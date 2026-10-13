@@ -80,6 +80,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("playback", 3),
     ("export", 3),
     ("format", 3),
+    ("scenerender", 3),
     ("engine", 4),
     ("platform", 5),
     ("ui-egui", 5),

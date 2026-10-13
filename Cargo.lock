@@ -2240,6 +2240,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "filmcraft-scenerender"
+version = "0.7.2"
+dependencies = [
+ "filmcraft-bitstream",
+ "filmcraft-frame",
+ "filmcraft-interchange",
+ "filmcraft-media",
+ "filmcraft-time",
+ "image",
+ "roxmltree",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "filmcraft-scopes"
 version = "0.7.2"
 dependencies = [

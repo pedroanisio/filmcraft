@@ -1,0 +1,24 @@
+[package]
+name = "filmcraft-scenerender"
+description = "FilmCraft bridge to scene-render: renders sr-core scene documents as media through the separately installed renderer, with frame caching and a placeholder when it is absent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+filmcraft-time = { workspace = true }
+filmcraft-bitstream = { workspace = true }
+filmcraft-frame = { workspace = true }
+filmcraft-media = { workspace = true }
+filmcraft-interchange = { workspace = true }
+roxmltree = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# PNG fixtures for the fake renderer (same version and features the media crate decodes with)
+image = { version = "0.25", default-features = false, features = ["png"] }
