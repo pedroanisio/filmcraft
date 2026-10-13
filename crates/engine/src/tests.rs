@@ -139,6 +139,18 @@ fn trim_linked_and_ripple_delete() {
     assert_eq!(q.video_tracks[0].items[0].start, s.sequence_rate().tick_of(12), "the trim gap remains");
 }
 
+/// #1163: `"linked": false` selects the clips alone (the Alt marquee), even with linked selection on.
+#[test]
+fn select_linked_false_leaves_the_linked_partners_out() {
+    let mut s = demo();
+    let first = s.active_sequence().unwrap().video_tracks[0].items[0].clone();
+    assert!(s.state.linked_selection);
+    s.execute("timeline.select", json!({"clips": [first.id.0], "linked": false})).unwrap();
+    assert_eq!(s.state.selection, vec![first.id], "only the clip, not its linked audio");
+    s.execute("timeline.select", json!({"clips": [first.id.0], "linked": true})).unwrap();
+    assert_eq!(s.state.selection.len(), 2, "linked: true adds the audio");
+}
+
 #[test]
 fn slide_moves_linked_audio_with_the_video() {
     let mut s = demo();
