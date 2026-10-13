@@ -2249,6 +2249,7 @@ dependencies = [
  "filmcraft-media",
  "filmcraft-time",
  "image",
+ "log",
  "proptest",
  "roxmltree",
  "serde",
