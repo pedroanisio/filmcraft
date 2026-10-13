@@ -1676,6 +1676,12 @@
 	Enable ProRes hardware accelerated encoding, if available	Aktifkan enkode ProRes dengan akselerasi perangkat keras, jika tersedia
 	Enable clip and XMP metadata linking	Aktifkan penautan metadata klip dan XMP
 	Enable developer mode	Aktifkan mode pengembang
+	Scene Renderer Status	Status perender adegan
+	Clear Scene Render Cache	Hapus cache render adegan
+	scene-render executable (empty = auto)	Berkas eksekusi scene-render (kosong = otomatis)
+	Scene preview quality	Kualitas pratinjau adegan
+	Draft	Draf
+	scene-render is a separate program that FilmCraft spawns to render .scene files. FilmCraft never ships it. An empty path searches FILMCRAFT_SCENE_RENDER, then PATH.	scene-render adalah program terpisah yang dijalankan FilmCraft untuk merender berkas .scene. FilmCraft tidak pernah menyertakannya. Jalur kosong mencari FILMCRAFT_SCENE_RENDER, lalu PATH.
 	Enable hardware accelerated decoding (requires restart)	Aktifkan dekode dengan akselerasi perangkat keras (perlu mulai ulang)
 	Enable language auto-detection	Aktifkan deteksi bahasa otomatis
 	Enable proxies	Aktifkan proksi

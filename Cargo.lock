@@ -1918,6 +1918,7 @@ dependencies = [
  "filmcraft-mxf",
  "filmcraft-project",
  "filmcraft-render",
+ "filmcraft-scenerender",
  "filmcraft-scopes",
  "filmcraft-speech",
  "filmcraft-testkit",

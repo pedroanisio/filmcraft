@@ -44,6 +44,7 @@ pub mod proxies;
 pub mod relink;
 pub mod remix;
 pub mod scene_detect;
+mod scene_render;
 pub mod scopes;
 pub mod sequence_extras;
 pub mod sequence_tools;
@@ -583,6 +584,7 @@ impl Session {
         self.export_presets.set_dir(&cfg.data_dir);
         self.prefs_path = Some(prefs_path);
         self.apply_media_cache();
+        self.apply_scene_prefs();
         self.persistence = Some(autosave::Persistence::start(&cfg, self.prefs.auto_save.clone())?);
         self.sync_persistence();
         Ok(())
@@ -652,6 +654,7 @@ impl Session {
         if cache_changed {
             self.apply_media_cache();
         }
+        self.apply_scene_prefs();
         if self.media.use_proxies() != self.prefs.media.enable_proxies {
             self.media.set_use_proxies(self.prefs.media.enable_proxies);
             self.bump_view();
@@ -1327,3 +1330,6 @@ mod source_placement_tests;
 mod frame_export_tests;
 #[cfg(test)]
 mod wasm_clock_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod scene_render_tests;

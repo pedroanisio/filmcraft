@@ -49,6 +49,10 @@ pub struct MediaPool {
     proxies: RwLock<HashMap<ItemId, (String, SharedSource)>>,
     offline: Arc<RwLock<HashMap<ItemId, OfflineStatus>>>,
     use_proxies: AtomicBool,
+    scene_env: RwLock<filmcraft_scenerender::Env>,
+    scene_gate: RwLock<()>,
+    scene_items: RwLock<BTreeSet<ItemId>>,
+    final_scene_sources: RwLock<HashMap<ItemId, (String, SharedSource)>>,
     /// Per item: video frames that failed in a row in the monitors (see [`Self::monitor_source`]).
     failures: Arc<Mutex<HashMap<ItemId, u32>>>,
     /// Openers tried before the built-in ones (MP4/MOV + codecs register here).
@@ -63,6 +67,10 @@ impl Default for MediaPool {
             proxies: RwLock::new(HashMap::new()),
             offline: Arc::new(RwLock::new(HashMap::new())),
             use_proxies: AtomicBool::new(false),
+            scene_env: RwLock::new(Default::default()),
+            scene_gate: RwLock::new(()),
+            scene_items: RwLock::new(BTreeSet::new()),
+            final_scene_sources: RwLock::new(HashMap::new()),
             failures: Arc::default(),
             openers: RwLock::new(filmcraft_codecs::openers()),
         }
@@ -139,6 +147,60 @@ fn file_name(path: &str) -> String {
 }
 
 impl MediaPool {
+    /// Apply renderer discovery, disk cache and playback quality. Returns whether they changed.
+    pub fn set_scene_env(&self, config: filmcraft_scenerender::Config, cache_dir: Option<std::path::PathBuf>, quality: filmcraft_scenerender::Quality) -> bool {
+        let _gate = self.scene_gate.write().unwrap_or_else(|e| e.into_inner());
+        let mut env = self.scene_env.write().unwrap_or_else(|e| e.into_inner());
+        if env.config == config && env.cache_dir == cache_dir && env.quality == quality {
+            return false;
+        }
+        env.config = config;
+        env.cache_dir = cache_dir;
+        env.quality = quality;
+        self.clear_scenes_locked();
+        true
+    }
+
+    /// Forget scene sources and their proxies, retaining every other media source.
+    pub fn clear_scenes(&self) {
+        let _gate = self.scene_gate.write().unwrap_or_else(|e| e.into_inner());
+        self.clear_scenes_locked();
+    }
+
+    fn clear_scenes_locked(&self) {
+        let mut items = self.scene_items.write().unwrap_or_else(|e| e.into_inner());
+        self.sources.write().unwrap_or_else(|e| e.into_inner()).retain(|id, _| !items.contains(id));
+        self.proxies.write().unwrap_or_else(|e| e.into_inner()).retain(|id, _| !items.contains(id));
+        self.offline.write().unwrap_or_else(|e| e.into_inner()).retain(|id, _| !items.contains(id));
+        self.failures.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| !items.contains(id));
+        self.final_scene_sources.write().unwrap_or_else(|e| e.into_inner()).clear();
+        items.clear();
+    }
+
+    fn track_scene(&self, item: ItemId, scene: bool) {
+        // Called on every frame request: take the write lock only when membership changes.
+        if self.scene_items.read().unwrap_or_else(|e| e.into_inner()).contains(&item) == scene {
+            return;
+        }
+        let mut items = self.scene_items.write().unwrap_or_else(|e| e.into_inner());
+        if scene {
+            items.insert(item);
+        } else {
+            items.remove(&item);
+        }
+    }
+
+    pub(crate) fn open_scene_bytes(&self, path: &str, bytes: &[u8]) -> filmcraft_media::Result<filmcraft_scenerender::Opened> {
+        let env = self.scene_env.read().unwrap_or_else(|e| e.into_inner());
+        crate::scene_render::open(path, bytes, &env)
+    }
+
+    pub(crate) fn scene_warning(&self, item: ItemId, path: &str, warning: Option<&str>) {
+        if let Some(warning) = warning {
+            self.set_offline(item, OfflineReason::Unreadable, path, warning);
+        }
+    }
+
     pub fn register_opener(&self, o: Opener) {
         self.openers.write().unwrap_or_else(|e| e.into_inner()).push(o);
     }
@@ -155,6 +217,8 @@ impl MediaPool {
 
     /// Cache a source opened from `path` for an item.
     pub fn insert_file(&self, item: ItemId, path: &str, src: SharedSource) {
+        let _gate = self.scene_gate.read().unwrap_or_else(|e| e.into_inner());
+        self.track_scene(item, crate::scene_render::is_scene(path));
         self.offline.write().unwrap_or_else(|e| e.into_inner()).remove(&item);
         let src = self.unsupported_as_slate(item, path, src);
         self.sources.write().unwrap_or_else(|e| e.into_inner()).insert(item, (format!("file:{path}"), src));
@@ -168,6 +232,9 @@ impl MediaPool {
     }
 
     pub fn remove(&self, item: ItemId) {
+        let _gate = self.scene_gate.write().unwrap_or_else(|e| e.into_inner());
+        self.scene_items.write().unwrap_or_else(|e| e.into_inner()).remove(&item);
+        self.final_scene_sources.write().unwrap_or_else(|e| e.into_inner()).remove(&item);
         self.sources.write().unwrap_or_else(|e| e.into_inner()).remove(&item);
         self.proxies.write().unwrap_or_else(|e| e.into_inner()).remove(&item);
         self.offline.write().unwrap_or_else(|e| e.into_inner()).remove(&item);
@@ -175,6 +242,9 @@ impl MediaPool {
 
     /// Forget every opened source (files are re-read on next use).
     pub fn clear(&self) {
+        let _gate = self.scene_gate.write().unwrap_or_else(|e| e.into_inner());
+        self.scene_items.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.final_scene_sources.write().unwrap_or_else(|e| e.into_inner()).clear();
         self.sources.write().unwrap_or_else(|e| e.into_inner()).clear();
         self.proxies.write().unwrap_or_else(|e| e.into_inner()).clear();
         self.offline.write().unwrap_or_else(|e| e.into_inner()).clear();
@@ -186,7 +256,12 @@ impl MediaPool {
 
     /// Sources opened so far (originals and proxies; `perf.stats`).
     pub fn open_sources(&self) -> usize {
-        self.sources.read().unwrap_or_else(|e| e.into_inner()).len() + self.proxies.read().unwrap_or_else(|e| e.into_inner()).len()
+        self.sources
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
+            .saturating_add(self.proxies.read().unwrap_or_else(|e| e.into_inner()).len())
+            .saturating_add(self.final_scene_sources.read().unwrap_or_else(|e| e.into_inner()).len())
     }
 
     pub fn use_proxies(&self) -> bool {
@@ -224,6 +299,9 @@ impl MediaPool {
     /// Read and open a file through `services` (through its random-access reader when the host
     /// has one: containers then read only their index now and samples on demand).
     pub fn open_file(&self, path: &str, services: &dyn Services) -> Result<SharedSource, MediaError> {
+        if crate::scene_render::is_scene(path) {
+            return self.open_scene_bytes(path, &crate::scene_render::read(path, services)?).map(|opened| opened.source);
+        }
         let io = |e: std::io::Error| if e.kind() == std::io::ErrorKind::NotFound { MediaError::Offline(e.to_string()) } else { MediaError::Io(e.to_string()) };
         if let Some(r) = services.reader(path) {
             let openers = self.openers.read().unwrap_or_else(|e| e.into_inner()).clone();
@@ -237,6 +315,9 @@ impl MediaPool {
     /// format without a streaming reader is read whole only up to [`PROBE_WHOLE_FILE_MAX`] bytes
     /// (#157). Hosts without random-access readers open the file as [`Self::open_file`] does.
     pub fn probe_file(&self, path: &str, services: &dyn Services) -> Result<SharedSource, MediaError> {
+        if crate::scene_render::is_scene(path) {
+            return self.open_file(path, services);
+        }
         let Some(r) = services.reader(path) else { return self.open_file(path, services) };
         let r = r.map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { MediaError::Offline(e.to_string()) } else { MediaError::Io(e.to_string()) })?;
         let openers = self.openers.read().unwrap_or_else(|e| e.into_inner()).clone();
@@ -245,17 +326,22 @@ impl MediaPool {
 
     /// Resolve (and cache) the source for a project item, using proxies when they are enabled.
     pub fn source_for(&self, p: &Project, item: ItemId, services: &dyn Services) -> Option<SharedSource> {
-        self.resolve(p, item, services, self.use_proxies())
+        self.resolve(p, item, services, self.use_proxies(), false)
     }
 
     /// Resolve the full-resolution source for an item (never a proxy).
     pub fn full_res_source(&self, p: &Project, item: ItemId, services: &dyn Services) -> Option<SharedSource> {
-        self.resolve(p, item, services, false)
+        self.resolve(p, item, services, false, false)
     }
 
-    fn resolve(&self, p: &Project, item: ItemId, services: &dyn Services, proxies: bool) -> Option<SharedSource> {
+    fn resolve(&self, p: &Project, item: ItemId, services: &dyn Services, proxies: bool, final_scenes: bool) -> Option<SharedSource> {
+        // An environment change must not race a source opened under the old preferences into a cache.
+        let _gate = self.scene_gate.read().unwrap_or_else(|e| e.into_inner());
         let (item, m, _) = p.resolve_media(item)?;
         let it = p.item(item)?;
+        let scene = matches!(&m.media, MediaRef::File { path } if crate::scene_render::is_scene(path));
+        self.track_scene(item, scene);
+        let sources = if scene && final_scenes { &self.final_scene_sources } else { &self.sources };
         if proxies
             && !m.offline
             && let Some(MediaRef::File { path }) = &m.proxy
@@ -264,7 +350,7 @@ impl MediaPool {
             return Some(s);
         }
         let key = media_key(m);
-        if let Some((k, s)) = self.sources.read().unwrap_or_else(|e| e.into_inner()).get(&item)
+        if let Some((k, s)) = sources.read().unwrap_or_else(|e| e.into_inner()).get(&item)
             && (k.is_empty() || *k == key)
         {
             return Some(s.clone());
@@ -279,13 +365,22 @@ impl MediaPool {
                 self.set_offline(item, OfflineReason::MadeOffline, path, "made offline");
                 Arc::new(SlateSource::new(m.info.clone(), &file_name(path), OfflineReason::MadeOffline))
             }
-            MediaRef::File { path } => match if m.info.kind == filmcraft_media::MediaKind::ImageSequence {
-                open_image_sequence(path, services, m.info.frame_rate(), &it.name)
+            MediaRef::File { path } => match if scene {
+                let mut env = self.scene_env.read().unwrap_or_else(|e| e.into_inner()).clone();
+                if final_scenes {
+                    env.quality = filmcraft_scenerender::Quality::Final;
+                }
+                crate::scene_render::read(path, services)
+                    .and_then(|bytes| crate::scene_render::open(path, &bytes, &env))
+                    .map(|opened| (opened.source, opened.warning))
+            } else if m.info.kind == filmcraft_media::MediaKind::ImageSequence {
+                open_image_sequence(path, services, m.info.frame_rate(), &it.name).map(|source| (source, None))
             } else {
-                self.open_file(path, services)
+                self.open_file(path, services).map(|source| (source, None))
             } {
-                Ok(s) => {
+                Ok((s, warning)) => {
                     self.offline.write().unwrap_or_else(|e| e.into_inner()).remove(&item);
+                    self.scene_warning(item, path, warning.as_deref());
                     self.unsupported_as_slate(item, path, s)
                 }
                 Err(_) if filmcraft_media::pending::is_set() => {
@@ -300,7 +395,7 @@ impl MediaPool {
                 }
             },
         };
-        self.sources.write().unwrap_or_else(|e| e.into_inner()).insert(item, (key, src.clone()));
+        sources.write().unwrap_or_else(|e| e.into_inner()).insert(item, (key, src.clone()));
         Some(src)
     }
 
@@ -343,12 +438,12 @@ impl MediaPool {
 
     /// A render-side provider bound to a project snapshot (proxies when enabled).
     pub fn provider(self: &Arc<Self>, project: Arc<Project>, services: Arc<dyn Services>) -> PoolProvider {
-        PoolProvider { pool: self.clone(), project, services, full_res: false, used: None }
+        PoolProvider { pool: self.clone(), project, services, full_res: false, final_scenes: false, used: None }
     }
 
-    /// A provider that always reads full-resolution media (export).
+    /// A provider that always reads full-resolution media; add [`PoolProvider::final_scenes`] for file export.
     pub fn full_res_provider(self: &Arc<Self>, project: Arc<Project>, services: Arc<dyn Services>) -> PoolProvider {
-        PoolProvider { pool: self.clone(), project, services, full_res: true, used: None }
+        PoolProvider { pool: self.clone(), project, services, full_res: true, final_scenes: false, used: None }
     }
 }
 
@@ -359,11 +454,19 @@ pub struct PoolProvider {
     pub services: Arc<dyn Services>,
     /// Ignore proxies (export always renders full resolution).
     pub full_res: bool,
+    final_scenes: bool,
     /// Items asked for so far, when recording ([`PoolProvider::recording`]).
     used: Option<Mutex<BTreeSet<ItemId>>>,
 }
 
 impl PoolProvider {
+    /// Render scenes at final quality in a separate cache, ignoring proxies for file export.
+    pub fn final_scenes(mut self) -> Self {
+        self.final_scenes = true;
+        self.full_res = true;
+        self
+    }
+
     /// This provider, remembering the items it is asked for so [`PoolProvider::offline_used`] can
     /// tell which of them rendered offline.
     pub fn recording(mut self) -> Self {
@@ -398,7 +501,13 @@ impl filmcraft_render::SourceProvider for PoolProvider {
         if let Some(used) = &self.used {
             used.lock().unwrap_or_else(|e| e.into_inner()).insert(item);
         }
-        if self.full_res { self.pool.full_res_source(&self.project, item, &*self.services) } else { self.pool.source_for(&self.project, item, &*self.services) }
+        if self.final_scenes {
+            self.pool.resolve(&self.project, item, &*self.services, false, true)
+        } else if self.full_res {
+            self.pool.full_res_source(&self.project, item, &*self.services)
+        } else {
+            self.pool.source_for(&self.project, item, &*self.services)
+        }
     }
 }
 

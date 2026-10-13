@@ -28,6 +28,7 @@ filmcraft-codecs = { workspace = true }
 filmcraft-project = { workspace = true }
 filmcraft-edit = { workspace = true }
 filmcraft-render = { workspace = true }
+filmcraft-scenerender = { workspace = true }
 filmcraft-scopes = { workspace = true }
 filmcraft-text = { workspace = true }
 filmcraft-audio-dsp = { workspace = true }

@@ -198,7 +198,7 @@ fn render_clip(s: &Session, seq: ItemId, need: &AudioNeed, sample_rate: u32, bit
     settings.audio.channels = channels;
     settings.audio.bits = bits;
     let project = Arc::new(p);
-    let provider = s.media.full_res_provider(project.clone(), s.services.clone());
+    let provider = s.media.full_res_provider(project.clone(), s.services.clone()).final_scenes();
     filmcraft_export::export(&project, rs, &settings, &provider, &Default::default()).map_err(|e| EngineError::Other(e.to_string()))?;
     let wav = std::mem::take(&mut *buf.lock().unwrap_or_else(|e| e.into_inner()));
     let (pcm, ch, _, b) = filmcraft_interchange::wav::parse_wav(&wav).ok_or_else(|| EngineError::Other("audio render produced no WAVE data".into()))?;
@@ -340,7 +340,7 @@ pub fn prepare_audio(s: &Session, seq: ItemId, plan: &AudioPlan, media_dir: &str
 }
 
 /// Render the video of `seq` to one file for an AAF video mixdown.
-fn mixdown(s: &Session, seq: ItemId, path: &str) -> Result<MixdownVideo> {
+fn mixdown(s: &Session, seq: ItemId, path: &str) -> Result<(MixdownVideo, Vec<crate::media_pool::OfflineMedia>)> {
     let q = s.project.sequence(seq).ok_or(EngineError::NoSequence)?;
     let dur = q.duration();
     if dur <= Tick::ZERO {
@@ -365,9 +365,9 @@ fn mixdown(s: &Session, seq: ItemId, path: &str) -> Result<MixdownVideo> {
         settings.sink = Some(filmcraft_export::OutputSink(Arc::new(move |p: &str, d: Vec<u8>| services.write_file(p, &d))));
     }
     let project = s.project.clone();
-    let provider = s.media.full_res_provider(project.clone(), s.services.clone());
+    let provider = s.media.full_res_provider(project.clone(), s.services.clone()).final_scenes().recording();
     filmcraft_export::export(&project, seq, &settings, &provider, &Default::default()).map_err(|e| EngineError::Other(format!("video mixdown: {e}")))?;
-    Ok(MixdownVideo { path: path.to_string(), start: Tick::ZERO, duration: dur, width: q.settings.width, height: q.settings.height })
+    Ok((MixdownVideo { path: path.to_string(), start: Tick::ZERO, duration: dur, width: q.settings.width, height: q.settings.height }, provider.offline_used()))
 }
 
 fn report_json(r: &filmcraft_interchange::Report) -> Vec<String> {
@@ -400,9 +400,11 @@ pub fn export_aaf(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (essence, written) = prepare_audio(s, seq, &plan, &media_dir)?;
     files.extend(written);
+    let mut offline_media = Vec::new();
     let mixdown_video = if bool_p(p, "mixdownVideo").unwrap_or(false) {
         let ext = if str_p(p, "mixdownFormat") == Some("mxf") { "mxf" } else { "mov" };
-        let m = mixdown(s, seq, &join(&media_dir, &format!("{} Video Mixdown.{ext}", safe_name(&stem))))?;
+        let (m, offline) = mixdown(s, seq, &join(&media_dir, &format!("{} Video Mixdown.{ext}", safe_name(&stem))))?;
+        offline_media.extend(offline);
         files.push(m.path.clone());
         Some(m)
     } else {
@@ -415,7 +417,7 @@ pub fn export_aaf(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let (bytes, report) = filmcraft_interchange::aaf::export(&s.project, seq, &opts).map_err(|e| EngineError::Other(e.to_string()))?;
     s.services.write_file(&path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    Ok(json!({"path": path, "bytes": bytes.len(), "mediaFiles": files, "report": report_json(&report)}))
+    Ok(json!({"path": path, "bytes": bytes.len(), "mediaFiles": files, "report": report_json(&report), "offlineMedia": offline_media}))
 }
 
 /// `file.exportOmf`

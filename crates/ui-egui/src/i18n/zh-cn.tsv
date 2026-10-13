@@ -1659,6 +1659,12 @@
 	Enable ProRes hardware accelerated encoding, if available	如可用，启用 ProRes 硬件加速编码
 	Enable clip and XMP metadata linking	启用剪辑与 XMP 元数据链接
 	Enable developer mode	启用开发者模式
+	Scene Renderer Status	场景渲染器状态
+	Clear Scene Render Cache	清除场景渲染缓存
+	scene-render executable (empty = auto)	scene-render 可执行文件（留空 = 自动）
+	Scene preview quality	场景预览质量
+	Draft	草稿
+	scene-render is a separate program that FilmCraft spawns to render .scene files. FilmCraft never ships it. An empty path searches FILMCRAFT_SCENE_RENDER, then PATH.	scene-render 是 FilmCraft 启动来渲染 .scene 文件的独立程序。FilmCraft 从不附带它。路径留空时先搜索 FILMCRAFT_SCENE_RENDER，再搜索 PATH。
 	Enable hardware accelerated decoding (requires restart)	启用硬件加速解码（需要重启）
 	Enable language auto-detection	启用语言自动检测
 	Enable proxies	启用代理

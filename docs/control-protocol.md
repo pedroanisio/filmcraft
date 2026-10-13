@@ -109,6 +109,23 @@ management commands and dialog ids: offline media and relinking (`media.findMiss
 proxies (`media.createProxies`, `media.attachProxies`, `media.toggleProxies`, `proxies.*`), ingest
 (`project.ingestSettings`) and the Project Manager (`file.projectManager`, `pm.*`).
 
+Scene rendering imports `.scene` documents as ordinary file-backed media with the header's size,
+frame rate and duration. `file.import {paths: [...]}` returns `warnings: [string]` when a scene uses
+a placeholder because its external renderer is unavailable; invalid documents remain per-path errors.
+FilmCraft spawns the separately installed `scene-render` program and never ships it.
+
+| Command | Params | Result |
+|---|---|---|
+| `scene.renderer.status` | `{}` | `{found, path, version, schema, reason}`; unavailable values are `null`, and `reason` explains an unavailable renderer |
+| `scene.renderer.clearCache` | `{}` | `{bytes}` removed from `<media cache>/Scene Renders`; also drops cached scene sources and frames; errors if this session has no media cache folder |
+
+Both commands reject extra fields and non-object parameters. `prefs.set` accepts
+`plugins.sceneRenderPath` (empty searches `FILMCRAFT_SCENE_RENDER`, then `PATH`) and
+`plugins.sceneRenderPreviewQuality` (`draft` or `preview`, default `preview`). Renderer, quality or
+media-cache location changes reopen cached scenes and their proxies. File exports use `final`
+scene quality; playback and render previews use the preview preference. Export jobs report scenes
+rendered as placeholders in `offlineMedia`, including the renderer failure reason.
+
 **Moving clips**: `timeline.move {moves: [{clip, track, time}], insert?, linked?}` → `{moved: [clip ids]}`.
 With Linked Selection on (the default; `linked` overrides the toggle for one call) the linked
 partners of a listed clip that are not listed themselves move by the same time offset and stay on

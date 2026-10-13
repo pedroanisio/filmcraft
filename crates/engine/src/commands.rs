@@ -650,6 +650,12 @@ pub(crate) fn default_seq_settings_for(media: &MediaClip) -> SequenceSettings {
 pub fn import_bytes(s: &mut Session, path: &str, bytes: std::sync::Arc<[u8]>, bin: Option<filmcraft_project::BinId>) -> Result<ItemId> {
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
     let identity = crate::relink::identity_of_bytes(&bytes);
+    if crate::scene_render::is_scene(path) {
+        let opened = s.media.open_scene_bytes(path, &bytes)?;
+        let id = import_source(s, path, name, opened.source, identity, bin)?;
+        s.media.scene_warning(id, path, opened.warning.as_deref());
+        return Ok(id);
+    }
     let src = s.media.open_bytes(&name, bytes)?;
     import_source(s, path, name, src, identity, bin)
 }
@@ -658,6 +664,10 @@ pub fn import_bytes(s: &mut Session, path: &str, bytes: std::sync::Arc<[u8]>, bi
 /// only the container index is read now (web `Blob`s are never copied whole for containers).
 pub fn import_streamed(s: &mut Session, path: &str, bin: Option<filmcraft_project::BinId>) -> Result<ItemId> {
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
+    if crate::scene_render::is_scene(path) {
+        let bytes = crate::scene_render::read(path, &*s.services)?;
+        return import_bytes(s, path, bytes.into(), bin);
+    }
     let identity = crate::relink::identity_of(&*s.services, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let src = s.media.open_file(path, &*s.services)?;
     import_source(s, path, name, src, identity, bin)
@@ -1328,6 +1338,8 @@ fn build() -> Vec<CommandSpec> {
                 Ok(json!({"items": ids.iter().map(|i| i.0).collect::<Vec<_>>()}))
             }
         ),
+        cmd!("scene.renderer.status", "Scene Renderer Status", ["Help"], None, "{}", always, |s, p| crate::scene_render::status(s, p)),
+        cmd!("scene.renderer.clearCache", "Clear Scene Render Cache", [], None, "{}", always, |s, p| crate::scene_render::clear_cache(s, p)),
         cmd!("file.import", "Import…", ["File"], Some("Cmd+I"), r#"{"paths":[str],"bin":binId?,"imageSequence":bool?,"replace":bool?}"#, always, |s, p| {
             let bin = u64_p(p, "bin").map(filmcraft_project::BinId);
             let paths: Vec<String> = match p.get("paths").and_then(Value::as_array) {
@@ -1343,6 +1355,7 @@ fn build() -> Vec<CommandSpec> {
             }
             let mut ids = Vec::new();
             let mut errors = Vec::new();
+            let mut warnings = Vec::new();
             let mut sequences = Vec::new();
             let mut reports = Vec::new();
             let mut image_sequences = Vec::new();
@@ -1351,6 +1364,18 @@ fn build() -> Vec<CommandSpec> {
             let as_sequence = p.get("imageSequence").and_then(Value::as_bool).unwrap_or(false);
             let detect = !as_sequence && s.prefs.media.import_image_sequences && paths.len() == 1;
             for path in paths {
+                if crate::scene_render::is_scene(&path) {
+                    match import_streamed(s, &path, bin) {
+                        Ok(id) => {
+                            ids.push(id.0);
+                            if let Some(status) = s.media.offline_status(id) {
+                                warnings.push(format!("{path}: {}", status.error));
+                            }
+                        }
+                        Err(error) => errors.push(format!("{path}: {error}")),
+                    }
+                    continue;
+                }
                 if as_sequence || (detect && detect_image_sequence(s, &path)) {
                     match import_image_sequence(s, &path, bin) {
                         Ok((id, frames, missing)) => {
@@ -1428,6 +1453,11 @@ fn build() -> Vec<CommandSpec> {
             } else {
                 json!({"items": ids, "sequences": sequences, "documents": reports, "errors": errors})
             };
+            if !warnings.is_empty()
+                && let Some(object) = out.as_object_mut()
+            {
+                object.insert("warnings".into(), json!(warnings));
+            }
             if !image_sequences.is_empty() {
                 out["imageSequences"] = json!(image_sequences);
             }

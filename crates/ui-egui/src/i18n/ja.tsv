@@ -1665,6 +1665,12 @@
 	Enable ProRes hardware accelerated encoding, if available	可能な場合は、ハードウェアアクセラレーションによる ProRes エンコードを有効にする
 	Enable clip and XMP metadata linking	クリップと XMP メタデータのリンクを有効にする
 	Enable developer mode	開発者モードを有効にする
+	Scene Renderer Status	シーンレンダラーの状態
+	Clear Scene Render Cache	シーンレンダーキャッシュを消去
+	scene-render executable (empty = auto)	scene-render の実行ファイル（空 = 自動）
+	Scene preview quality	シーンプレビューの品質
+	Draft	ドラフト
+	scene-render is a separate program that FilmCraft spawns to render .scene files. FilmCraft never ships it. An empty path searches FILMCRAFT_SCENE_RENDER, then PATH.	scene-render は、FilmCraft が .scene ファイルをレンダリングするために起動する別のプログラムです。FilmCraft には同梱されていません。パスが空の場合は FILMCRAFT_SCENE_RENDER、次に PATH を検索します。
 	Enable hardware accelerated decoding (requires restart)	ハードウェアアクセラレーションによるデコードを有効にする (再起動が必要)
 	Enable language auto-detection	言語の自動検出を有効にする
 	Enable proxies	プロキシを有効にする

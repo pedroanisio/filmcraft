@@ -200,8 +200,12 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     std::fs::create_dir_all(&dest_dir).map_err(|e| EngineError::Other(format!("{dest}: {e}")))?;
 
     // ---- the job
-    let sources: BTreeMap<ItemId, filmcraft_media::SharedSource> =
-        work.iter().filter(|w| w.range.is_some()).filter_map(|w| s.media.full_res_source(&s.project, w.item, &*s.services).map(|src| (w.item, src))).collect();
+    let provider = s.media.full_res_provider(s.project.clone(), s.services.clone()).final_scenes();
+    let sources: BTreeMap<ItemId, filmcraft_media::SharedSource> = work
+        .iter()
+        .filter(|w| w.range.is_some())
+        .filter_map(|w| filmcraft_render::SourceProvider::source(&provider, w.item).map(|src| (w.item, src)))
+        .collect();
     if let Some(w) = work.iter().find(|w| w.range.is_some() && s.media.offline_status(w.item).is_some()) {
         return Err(EngineError::Other(format!("{} is offline; link it before consolidating", w.src_path)));
     }

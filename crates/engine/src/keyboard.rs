@@ -637,7 +637,7 @@ fn export_frame(s: &mut Session, p: &Value) -> Result<Value> {
             candidate.ok_or_else(|| bad("file.exportFrame", "choose a path: all default still names already exist"))?
         }
     };
-    let provider = s.media.full_res_provider(s.project.clone(), s.services.clone());
+    let provider = s.media.full_res_provider(s.project.clone(), s.services.clone()).final_scenes().recording();
     // On the web a frame can still be decoding (WebCodecs) or its bytes loading (Blob reads): the
     // render then leaves that clip out, so saving it would pass a blank or partial picture off as
     // the requested frame (#228). Report it instead and write nothing; a later call succeeds.
@@ -660,6 +660,9 @@ fn export_frame(s: &mut Session, p: &Value) -> Result<Value> {
     s.services.write_file(&path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let mut out =
         json!({"path": path, "width": w, "height": h, "depth": depth, "target": if target.source { "source" } else { "program" }, "time": target.time.0});
+    if let Some(object) = out.as_object_mut() {
+        object.insert("offlineMedia".into(), json!(provider.offline_used()));
+    }
     if import {
         out["import"] = s.execute("file.import", json!({"paths": [path]}))?;
     }

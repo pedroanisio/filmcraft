@@ -185,11 +185,13 @@ fn items_param(s: &Session, p: &Value) -> Vec<ItemId> {
 
 /// Start a background transcode job over `work` (item, output path, preset). Returns the job id.
 pub fn start_job(s: &mut Session, label: String, work: Vec<(ItemId, String, &'static Preset)>, on_done: OnDone, wait: bool) -> Result<u64> {
+    let provider = s.media.full_res_provider(s.project.clone(), s.services.clone());
+    let provider = if on_done == OnDone::AttachProxies { provider } else { provider.final_scenes() };
     let mut tasks = Vec::new();
     let mut total = 0;
     for (item, out, pr) in work {
         let (clip, _, name) = media_path(&s.project, item).ok_or_else(|| bad("media.createProxies", format!("item {} is not file media", item.0)))?;
-        let src = s.media.full_res_source(&s.project, item, &*s.services).ok_or_else(|| EngineError::Other(format!("{name}: no source")))?;
+        let src = filmcraft_render::SourceProvider::source(&provider, item).ok_or_else(|| EngineError::Other(format!("{name}: no source")))?;
         if s.media.offline_status(item).is_some() {
             return Err(EngineError::Other(format!("{name} is offline; link it first")));
         }

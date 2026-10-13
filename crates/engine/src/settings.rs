@@ -780,10 +780,20 @@ impl TimelinePrefs {
 }
 
 /// Settings ▸ Plugins.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PluginPrefs {
     pub developer_mode: bool,
+    /// External scene-render executable; empty searches the environment and PATH.
+    pub scene_render_path: String,
+    /// Playback quality: `draft` or `preview`. Exports always use `final`.
+    pub scene_render_preview_quality: String,
+}
+
+impl Default for PluginPrefs {
+    fn default() -> Self {
+        Self { developer_mode: false, scene_render_path: String::new(), scene_render_preview_quality: "preview".into() }
+    }
 }
 
 /// Indeterminate Media Timebase choices → frame rates.
@@ -1312,7 +1322,11 @@ static CATEGORIES: &[Category] = &[
         title: "Plugins",
         rows: &[
             Row::Group("Plugins", &[b("plugins.developerMode", "Enable developer mode", false)]),
-            Row::Note("No plugins are installed. Changes will take effect the next time you start FilmCraft."),
+            f("plugins.sceneRenderPath", "scene-render executable (empty = auto)", Kind::Path, true),
+            f("plugins.sceneRenderPreviewQuality", "Scene preview quality", Kind::Choice(&[("draft", "Draft"), ("preview", "Preview")]), true),
+            Row::Note(
+                "scene-render is a separate program that FilmCraft spawns to render .scene files. FilmCraft never ships it. An empty path searches FILMCRAFT_SCENE_RENDER, then PATH.",
+            ),
         ],
     },
     Category {
