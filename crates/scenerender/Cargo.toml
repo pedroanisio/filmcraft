@@ -22,3 +22,4 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # PNG fixtures for the fake renderer (same version and features the media crate decodes with)
 image = { version = "0.25", default-features = false, features = ["png"] }
+proptest = { workspace = true }
