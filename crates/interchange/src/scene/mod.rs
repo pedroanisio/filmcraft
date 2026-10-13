@@ -4,6 +4,7 @@
 //! land in their own modules. Everything here is pure: no file I/O, no external tools.
 
 pub mod diag;
+pub mod export;
 pub mod read;
 pub mod resolve;
 pub mod stack;
