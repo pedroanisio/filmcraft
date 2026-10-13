@@ -263,6 +263,9 @@ pub struct Imported {
 /// Import options beyond the defaults of [`import`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ImportOptions {
+    /// Continue past scene validation diagnostics and permit dropping unwritten scene overlays.
+    #[serde(default)]
+    pub lenient: bool,
     /// Directory relative media paths are resolved against (normally the document's directory).
     pub base_dir: Option<String>,
     /// EDLs carry no frame rate: the rate to interpret timecode at (default: guessed, 29.97 for
@@ -288,6 +291,17 @@ pub fn import_with(bytes: &[u8], format: Format, opts: &ImportOptions) -> Result
         }
         return Ok((imported, report));
     }
+    if format == Format::Scene {
+        let (mut imported, overlays, mut report) = scene::import(bytes, opts)?;
+        if !overlays.is_empty() {
+            if !opts.lenient {
+                return Err(Error::Other(format!("{} scene overlay document(s) require a caller that can write them", overlays.len())));
+            }
+            scene::import::drop_overlays(&mut imported, &overlays)?;
+            report.warn(format!("{} scene overlay document(s) dropped because the caller cannot write them", overlays.len()));
+        }
+        return Ok((imported, report));
+    }
     let text = decode_text(bytes);
     let mut report = Report::default();
     let imported = match format {
@@ -295,7 +309,7 @@ pub fn import_with(bytes: &[u8], format: Format, opts: &ImportOptions) -> Result
         Format::Fcp7Xml => fcp7::import(&text, opts, &mut report)?,
         Format::Fcpxml => fcpxml::import(&text, opts, &mut report)?,
         Format::Otio => otio::import(&text, opts, &mut report)?,
-        Format::Scene => return Err(Error::Other("sr-core scene import is not implemented yet".into())),
+        Format::Scene => return Err(Error::Other("scene dispatch must precede text decoding".into())),
         Format::Aaf | Format::Omf => return Err(Error::Other("AAF / OMF are binary documents".into())),
     };
     Ok((imported, report))

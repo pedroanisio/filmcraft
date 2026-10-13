@@ -5,6 +5,7 @@
 
 pub mod diag;
 pub mod export;
+pub mod import;
 pub mod read;
 pub mod resolve;
 pub mod stack;
@@ -12,6 +13,7 @@ pub mod validate;
 pub mod values;
 
 pub use diag::{Diagnostic, Severity};
+pub use import::{Overlay, import};
 pub use read::{Limits, SceneDoc, SceneVersion};
 
 use crate::Error;
