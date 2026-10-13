@@ -150,6 +150,18 @@ pub enum Error {
     NoSequence(ItemId),
     #[error("{0}")]
     Other(String),
+    /// A scene document that breaks its schema: every problem found, errors first in document order.
+    #[error("{}", invalid_summary(.0))]
+    Invalid(Vec<scene::diag::Diagnostic>),
+}
+
+fn invalid_summary(diags: &[scene::diag::Diagnostic]) -> String {
+    let errors: Vec<_> = diags.iter().filter(|d| d.is_error()).collect();
+    match errors.as_slice() {
+        [] => "the scene document is invalid".to_string(),
+        [one] => format!("invalid scene document: {one}"),
+        [first, rest @ ..] => format!("invalid scene document: {first} (and {} more errors)", rest.len()),
+    }
 }
 
 impl Error {

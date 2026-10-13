@@ -157,6 +157,10 @@ the original copyright and permission notice in its header.
 | File | Author | Source | Licence |
 |---|---|---|---|
 | `crates/platform/src/nvenc/ffi.rs` | NVIDIA Corporation (`nvEncodeAPI.h`); FilmCraft contributors (Rust transcription) | Structures (including `NV_ENC_CONFIG_HEVC` and its bit-field masks, `NV_ENC_PIC_PARAMS_HEVC`, `NV_ENC_SEI_PAYLOAD`, `NV_ENC_TIME_CODE`), function table, codec / profile GUIDs (H.264, HEVC Main, HEVC Main 10) and constants (`NV_ENC_LEVEL_HEVC_*`, tier, CU size, `NV_ENC_BUFFER_FORMAT_YUV420_10BIT`, `NV_ENC_CAPS_SUPPORT_10BIT_ENCODE`, BT.2020 / PQ / HLG VUI codes) transcribed from `nvEncodeAPI.h`, NVIDIA Video Codec SDK, API 12.1 (https://developer.nvidia.com/video-codec-sdk) | MIT (Copyright (c) 2010-2023 NVIDIA Corporation; notice kept in the file header) |
+| `crates/interchange/src/scene/validate/simple.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-model/src/xsd/simple.rs`, commit `c0c668b8` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
+| `crates/interchange/src/scene/validate/structure.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-model/src/xsd/structure.rs`, commit `c0c668b8` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
+| `crates/interchange/src/scene/validate/tables_gen.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-model/build.rs`, commit `c0c668b8` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
+| `crates/interchange/src/scene/validate/rules.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-model/src/rules.rs`, with `foam.rs` and `assets.rs` (`sequence_frame`), commit `c0c668b8` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
 
 ## Vendored specifications
 
@@ -167,6 +171,10 @@ Machine-readable specifications copied unchanged from their upstream repositorie
 |---|---|---|---|
 | `crates/interchange/schema/sr-core/scene-render.xsd` | Pedro Anisio Silva (sr-core) | sr-core `schema/scene-render.xsd`, schema 1.7.0, commit `babeccf0` (2026-10-12) | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
 | `crates/interchange/schema/sr-core/scene-render.sch` | Pedro Anisio Silva (sr-core) | sr-core `schema/scene-render.sch`, schema 1.7.0, commit `babeccf0` (2026-10-12) | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
+
+Code adapted from scene-render (Pedro Anisio Silva; PolyForm Noncommercial upstream) is relicensed by its
+author for FilmCraft under MIT OR Apache-2.0 (grant of 2026-10-13); each such file names its scene-render
+source in its header and is listed in the table above under "Third-party source code".
 
 ## Downloaded at runtime
 

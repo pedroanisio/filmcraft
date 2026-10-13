@@ -3,9 +3,12 @@
 //! The pipeline is [`read`] (bounded parse) → validate → resolve → import/export; the later stages
 //! land in their own modules. Everything here is pure: no file I/O, no external tools.
 
+pub mod diag;
 pub mod read;
+pub mod validate;
 pub mod values;
 
+pub use diag::{Diagnostic, Severity};
 pub use read::{Limits, SceneDoc, SceneVersion};
 
 use crate::Error;
