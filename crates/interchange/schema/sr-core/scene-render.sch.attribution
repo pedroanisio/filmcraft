@@ -1,0 +1,8 @@
+asset:        scene-render.sch
+title:        sr-core scene document rules 1.7.0 (ISO Schematron)
+author:       Pedro Anisio Silva (sr-core)
+source:       sr-core schema/scene-render.sch at commit babeccf0ca0cb2603b8f6a1d3cb07388b7d7a2cc (2026-10-12), vendored unchanged; its SHA-256 is in SHA256SUMS
+license:      MIT
+license-file: crates/interchange/schema/sr-core/LICENSE
+added:        2026-10-13 by Claude (agent) for Pedro Anisio Silva
+notes:        Used by the scene interchange (crates/interchange/src/scene) to validate documents and to generate the structure tables. Update only by copying a newer sr-core schema/ in full (all three files) and bumping the commit above.

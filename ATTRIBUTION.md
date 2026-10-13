@@ -158,6 +158,16 @@ the original copyright and permission notice in its header.
 |---|---|---|---|
 | `crates/platform/src/nvenc/ffi.rs` | NVIDIA Corporation (`nvEncodeAPI.h`); FilmCraft contributors (Rust transcription) | Structures (including `NV_ENC_CONFIG_HEVC` and its bit-field masks, `NV_ENC_PIC_PARAMS_HEVC`, `NV_ENC_SEI_PAYLOAD`, `NV_ENC_TIME_CODE`), function table, codec / profile GUIDs (H.264, HEVC Main, HEVC Main 10) and constants (`NV_ENC_LEVEL_HEVC_*`, tier, CU size, `NV_ENC_BUFFER_FORMAT_YUV420_10BIT`, `NV_ENC_CAPS_SUPPORT_10BIT_ENCODE`, BT.2020 / PQ / HLG VUI codes) transcribed from `nvEncodeAPI.h`, NVIDIA Video Codec SDK, API 12.1 (https://developer.nvidia.com/video-codec-sdk) | MIT (Copyright (c) 2010-2023 NVIDIA Corporation; notice kept in the file header) |
 
+## Vendored specifications
+
+Machine-readable specifications copied unchanged from their upstream repositories. Each has a
+`<file>.attribution` sidecar; the upstream licence file sits next to them.
+
+| File | Author | Source | Licence |
+|---|---|---|---|
+| `crates/interchange/schema/sr-core/scene-render.xsd` | Pedro Anisio Silva (sr-core) | sr-core `schema/scene-render.xsd`, schema 1.7.0, commit `babeccf0` (2026-10-12) | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
+| `crates/interchange/schema/sr-core/scene-render.sch` | Pedro Anisio Silva (sr-core) | sr-core `schema/scene-render.sch`, schema 1.7.0, commit `babeccf0` (2026-10-12) | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
+
 ## Downloaded at runtime
 
 These files are never in the repository or the app bundle. FilmCraft downloads them into the
