@@ -5,6 +5,8 @@
 
 pub mod diag;
 pub mod read;
+pub mod resolve;
+pub mod stack;
 pub mod validate;
 pub mod values;
 
