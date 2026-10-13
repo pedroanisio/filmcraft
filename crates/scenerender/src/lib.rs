@@ -17,6 +17,9 @@ pub mod source;
 pub mod store;
 pub mod timing;
 
+#[cfg(all(test, unix))]
+pub(crate) mod fake;
+
 use serde::{Deserialize, Serialize};
 
 /// Render quality passed to `scene-render render --quality`.
