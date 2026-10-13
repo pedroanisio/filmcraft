@@ -115,6 +115,7 @@ is traced or derived from Adobe artwork.
 | Lumetri "Look" presets (Teal & Orange, Warm Film, …) | `crates/render/src/effects.rs` (`apply_look`): procedural colour transforms, not LUT files |
 | Lumetri Presets (Effects panel: Cinematic, Film Emulation, Monochrome, Technical) and their preview picture | `crates/render/src/lumetri_presets.rs`: Lumetri parameter values chosen by contributors, descriptive names, and a procedural preview picture (dusk sky, ridges, lake, grey ramp, colour chips) |
 | Colour palette and layout metrics | `crates/ui-egui/src/theme.rs`: colour values and sizes only; no artwork |
+| Scene placeholder slate (diagonal stripes and an amber band, shown when scene-render is not installed) | `crates/scenerender/src/placeholder.rs` (`slate`): procedural pixels, no image files |
 
 ## Optional build input: craft-fonts
 
