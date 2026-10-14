@@ -2717,6 +2717,8 @@
 	General…	常规…
 	OMF…	OMF…
 	OpenTimelineIO…	OpenTimelineIO…
+	Scene…	场景…
+	sr-core scene (.scene)	sr-core 场景 (.scene)
 	Save Changes to this Workspace	保存对此工作区的更改
 	Save as New Workspace…	另存为新工作区…
 	Create Search Bin	创建搜索素材箱
@@ -3588,6 +3590,7 @@
 	Opens in your web browser: {url}	在网页浏览器中打开：{url}
 	Saves this session's log and shows it in your file manager.	保存本次会话的日志并在文件管理器中显示。
 	Shows a report on this computer.	显示本机的报告。
+	Shows whether scene-render was found, and its version.	显示是否找到了 scene-render 及其版本。
 	Shows the version, community links and credits in a FilmCraft window.	在 FilmCraft 窗口中显示版本、社区链接和致谢。
 	Couldn't open your web browser	无法打开网页浏览器
 	Open this address in your browser yourself:	请自行在浏览器中打开此地址：

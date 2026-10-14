@@ -2723,6 +2723,8 @@
 	General…	一般…
 	OMF…	OMF…
 	OpenTimelineIO…	OpenTimelineIO…
+	Scene…	シーン…
+	sr-core scene (.scene)	sr-core シーン (.scene)
 	Save Changes to this Workspace	このワークスペースへの変更を保存
 	Save as New Workspace…	新規ワークスペースとして保存…
 	Create Search Bin	検索ビンを作成
@@ -3612,6 +3614,7 @@
 	Opens in your web browser: {url}	ウェブブラウザーで開きます：{url}
 	Saves this session's log and shows it in your file manager.	このセッションのログを保存し、ファイルマネージャーで表示します。
 	Shows a report on this computer.	このコンピューターのレポートを表示します。
+	Shows whether scene-render was found, and its version.	scene-render が見つかったかどうかと、そのバージョンを表示します。
 	Shows the version, community links and credits in a FilmCraft window.	バージョン、コミュニティへのリンク、クレジットを FilmCraft のウィンドウに表示します。
 	Couldn't open your web browser	ウェブブラウザーを開けませんでした
 	Open this address in your browser yourself:	このアドレスをご自身でブラウザーで開いてください：

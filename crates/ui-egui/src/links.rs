@@ -50,6 +50,7 @@ pub fn menu_hint(command: &str) -> Option<String> {
             "help.revealLogFiles" => tl!("Saves this session's log and shows it in your file manager."),
             "help.systemCompatibilityReport" => tl!("Shows a report on this computer."),
             "app.about" => tl!("Shows the version, community links and credits in a FilmCraft window."),
+            "scene.renderer.status" => tl!("Shows whether scene-render was found, and its version."),
             _ => return None,
         }
         .to_string(),
