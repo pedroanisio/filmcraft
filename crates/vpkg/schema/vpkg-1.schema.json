@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scene-render:vpkg:1",
+  "title": "Scene video package manifest (vpkg.json) 1.1",
+  "description": "Authoring spec (in a project) and packed manifest (at the root of a .vpkg.zip). Packing fills video, files, fonts, external, rewrites and packed.",
+  "type": "object",
+  "required": ["format", "formatVersion", "package", "scenes"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"type": "string"},
+    "format": {"const": "scene-video-package"},
+    "formatVersion": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+    "package": {
+      "type": "object",
+      "required": ["id", "version", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?$"},
+        "title": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "languages": {"type": "array", "items": {"type": "string"}},
+        "license": {"type": "string"},
+        "authors": {"type": "array", "items": {"type": "string"}},
+        "created": {"type": "string"},
+        "homepage": {"type": "string"}
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "role"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {"$ref": "#/$defs/relpath"},
+          "role": {"enum": ["primary", "variant", "draft", "archive"]},
+          "targets": {"type": "array", "items": {"$ref": "#/$defs/engineId"}},
+          "derivedFrom": {"$ref": "#/$defs/relpath"},
+          "generatedBy": {"type": "string"},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "include": {"type": "array", "items": {"type": "string"}},
+    "exclude": {"type": "array", "items": {"type": "string"}},
+    "fetch": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "url", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {"$ref": "#/$defs/relpath"},
+          "url": {"type": "string", "pattern": "^(https?|file)://"},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "size": {"type": "integer", "minimum": 0},
+          "license": {"type": "string"},
+          "credit": {"type": "string"},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string"},
+              "version": {"type": "string"},
+              "features": {"type": "array", "items": {"type": "string"}},
+              "for": {"type": "array", "items": {"type": "string"}},
+              "note": {"type": "string"}
+            }
+          }
+        },
+        "python": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "engines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"$ref": "#/$defs/engineId"},
+          "impl": {"type": "string"},
+          "version": {"type": "string"},
+          "commit": {"type": "string"},
+          "tested": {"enum": ["full", "stills", "partial", "untested"]},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+        "deliverables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+              "path": {"$ref": "#/$defs/relpath"},
+              "role": {"type": "string"},
+              "step": {"type": "string"},
+              "note": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "credits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "paths": {"type": "array", "items": {"type": "string"}},
+          "title": {"type": "string"},
+          "author": {"type": "string"},
+          "license": {"type": "string"},
+          "url": {"type": "string"},
+          "note": {"type": "string"},
+          "from": {"type": "string"}
+        }
+      }
+    },
+    "editorial": {"type": "object"},
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scene": {"$ref": "#/$defs/relpath"},
+        "schemaVersion": {"type": "string"},
+        "width": {"type": "integer"},
+        "height": {"type": "integer"},
+        "fps": {"type": "string"},
+        "duration": {"type": "number"},
+        "audio": {"type": "boolean"},
+        "captions": {"type": "array", "items": {"type": "string"}},
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": false,
+            "properties": {"id": {"type": "string"}, "path": {"type": "string"}}
+          }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "size", "sha256", "role"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {"$ref": "#/$defs/relpath"},
+          "size": {"type": "integer", "minimum": 0},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "role": {"enum": ["scene", "include", "asset", "font", "script", "schema", "source", "doc", "report", "preview", "data", "config", "other"]},
+          "mediaType": {"type": "string"},
+          "referencedBy": {"type": "array", "items": {"type": "string"}},
+          "generatedBy": {"type": "string"},
+          "originalSha256": {"$ref": "#/$defs/sha256"},
+          "license": {"type": "string"},
+          "credit": {"type": "string"}
+        }
+      }
+    },
+    "fonts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["family", "path", "weight", "style"],
+        "additionalProperties": false,
+        "properties": {
+          "family": {"type": "string"},
+          "requested": {"type": "array", "items": {"type": "string"}},
+          "path": {"$ref": "#/$defs/relpath"},
+          "index": {"type": "integer", "minimum": 0},
+          "weight": {"type": "integer"},
+          "style": {"enum": ["normal", "italic"]},
+          "origin": {"enum": ["project", "system"]},
+          "copyright": {"type": "string"},
+          "license": {"type": "string"},
+          "licenseUrl": {"type": "string"},
+          "declaredIn": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "external": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "original"],
+        "additionalProperties": false,
+        "properties": {"path": {"$ref": "#/$defs/relpath"}, "original": {"type": "string"},
+                       "referencedBy": {"type": "array", "items": {"type": "string"}}}
+      }
+    },
+    "rewrites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "changes"],
+        "additionalProperties": false,
+        "properties": {"path": {"$ref": "#/$defs/relpath"}, "changes": {"type": "array", "items": {"type": "string"}}}
+      }
+    },
+    "packed": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool": {"type": "string"},
+        "toolVersion": {"type": "string"},
+        "at": {"type": "string"},
+        "projectDir": {"type": "string"},
+        "totalSize": {"type": "integer"},
+        "fileCount": {"type": "integer"},
+        "metaSha256": {"type": "object", "additionalProperties": {"$ref": "#/$defs/sha256"}}
+      }
+    }
+  },
+  "$defs": {
+    "relpath": {"type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?![\\s\\S]*(?:^|/)\\.\\.(?:/|$))[^\\\\\\u0000-\\u001f\\u007f]+$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "engineId": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "step": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
+        "kind": {"enum": ["generate", "validate", "render", "audio", "mux", "command"]},
+        "description": {"type": "string"},
+        "run": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "cwd": {"$ref": "#/$defs/relpath"},
+        "env": {"type": "object", "additionalProperties": {"type": "string"}},
+        "needs": {"type": "array", "items": {"type": "string"}},
+        "inputs": {"type": "array", "items": {"type": "string"}},
+        "outputs": {"type": "array", "items": {"type": "string"}},
+        "idempotent": {"type": "boolean"},
+        "optional": {"type": "boolean"},
+        "requires": {"type": "array", "items": {"type": "string"}},
+        "render": {
+          "type": "object",
+          "required": ["scene"],
+          "additionalProperties": false,
+          "properties": {
+            "scene": {"$ref": "#/$defs/relpath"},
+            "output": {"type": "string"},
+            "to": {"type": "string"},
+            "stills": {"type": "array", "items": {"type": "number"}},
+            "isolate": {"type": "boolean"},
+            "args": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}}
+          }
+        }
+      }
+    }
+  }
+}

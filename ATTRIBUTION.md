@@ -50,6 +50,9 @@ iconography, images or other Adobe assets; open licences only; every asset attri
 | `assets/app-icon/hicolor/512x512/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 512 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
 | `assets/app-icon/hicolor/scalable/apps/ai.storyteller.filmcraft.svg` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme scalable | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
 | `apps/filmcraft-web/web/favicon.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; 128 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `crates/vpkg/tests/fixtures/fetch.vpkg.zip` | FilmCraft contributors | Original synthetic test content; sr-core package oracle | CC0-1.0 (embedded sr-core schema: MIT) |
+| `crates/vpkg/tests/fixtures/includes.vpkg.zip` | FilmCraft contributors | Original synthetic test content; sr-core package oracle | CC0-1.0 (embedded sr-core schema: MIT) |
+| `crates/vpkg/tests/fixtures/minimal.vpkg.zip` | FilmCraft contributors | Original synthetic test content; sr-core package oracle | CC0-1.0 (embedded sr-core schema: MIT) |
 
 ## Golden test images
 
@@ -164,6 +167,10 @@ the original copyright and permission notice in its header.
 | `crates/interchange/src/scene/validate/rules.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-model/src/rules.rs`, with `foam.rs` and `assets.rs` (`sequence_frame`), commit `c0c668b8` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
 | `crates/interchange/src/scene/resolve.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-eval/src/program.rs` and `eval.rs` (clocks, sequence placement, transitions, transform parents) and `layout.rs` (fit boxes), adapted rather than transcribed, commit `9ebe0889` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
 | `crates/interchange/src/scene/import/properties.rs` (`interpolation`) | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-eval/src/curve.rs` (`resolve`: named CSS control points, temporal-handle resolution), adapted rather than transcribed, commit `55ee9d1f` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
+| `crates/vpkg/src/manifest.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Adapted from sr-core `sr_core/vpkg/manifest.py`, commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
+| `crates/vpkg/src/zip.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Adapted from sr-core `sr_core/vpkg/pack.py` (compression policy and timestamps), commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
+| `crates/vpkg/src/verify.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Adapted from sr-core `sr_core/vpkg/archive.py`, `refs.py`, `pack.py` (output globs), commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
+| `crates/vpkg/src/write.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Adapted from sr-core `sr_core/vpkg/pack.py`, `readme.py`, commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
 
 ## Vendored specifications
 
@@ -174,6 +181,7 @@ Machine-readable specifications copied unchanged from their upstream repositorie
 |---|---|---|---|
 | `crates/interchange/schema/sr-core/scene-render.xsd` | Pedro Anisio Silva (sr-core) | sr-core `schema/scene-render.xsd`, schema 1.7.0, commit `babeccf0` (2026-10-12) | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
 | `crates/interchange/schema/sr-core/scene-render.sch` | Pedro Anisio Silva (sr-core) | sr-core `schema/scene-render.sch`, schema 1.7.0, commit `babeccf0` (2026-10-12) | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
+| `crates/vpkg/schema/vpkg-1.schema.json` | Pedro Anisio Silva (sr-core) | sr-core `sr_core/vpkg/schema/vpkg-1.schema.json`, commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
 
 Code adapted from scene-render (Pedro Anisio Silva; PolyForm Noncommercial upstream) is relicensed by its
 author for FilmCraft under MIT OR Apache-2.0 (grant of 2026-10-13); each such file names its scene-render

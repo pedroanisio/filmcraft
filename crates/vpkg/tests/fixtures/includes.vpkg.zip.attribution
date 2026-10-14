@@ -1,0 +1,8 @@
+asset:        includes.vpkg.zip
+title:        Tiny includes.vpkg package oracle
+author:       FilmCraft contributors
+source:       original work
+license:      CC0-1.0
+license-file: not required
+added:        2026-10-14 by Codex (agent)
+notes:        Original synthetic scene and data generated for FilmCraft tests; packed with sr_core.vpkg pack at sr-core babeccf0. No third-party media. Contains the MIT sr-core manifest schema, whose notice is shipped in crates/interchange/schema/sr-core/LICENSE; CC0 applies to the test content.

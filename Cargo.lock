@@ -2391,6 +2391,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "filmcraft-vpkg"
+version = "0.7.2"
+dependencies = [
+ "filmcraft-bitstream",
+ "filmcraft-interchange",
+ "proptest",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "filmcraft-web"
 version = "0.7.2"
 dependencies = [

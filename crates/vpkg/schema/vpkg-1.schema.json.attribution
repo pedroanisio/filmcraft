@@ -1,0 +1,8 @@
+asset:        vpkg-1.schema.json
+title:        sr-core scene video package manifest schema 1.1
+author:       Pedro Anisio Silva (sr-core)
+source:       sr-core sr_core/vpkg/schema/vpkg-1.schema.json at commit babeccf0ca0cb2603b8f6a1d3cb07388b7d7a2cc, vendored unchanged
+license:      MIT
+license-file: crates/interchange/schema/sr-core/LICENSE
+added:        2026-10-14 by Codex (agent) for Pedro Anisio Silva
+notes:        Used by filmcraft-vpkg for manifest validation and embedded in written packages.
