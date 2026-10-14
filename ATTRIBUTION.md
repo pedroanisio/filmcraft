@@ -163,6 +163,7 @@ the original copyright and permission notice in its header.
 | `crates/interchange/src/scene/validate/tables_gen.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-model/build.rs`, commit `c0c668b8` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
 | `crates/interchange/src/scene/validate/rules.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-model/src/rules.rs`, with `foam.rs` and `assets.rs` (`sequence_frame`), commit `c0c668b8` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
 | `crates/interchange/src/scene/resolve.rs` | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-eval/src/program.rs` and `eval.rs` (clocks, sequence placement, transitions, transform parents) and `layout.rs` (fit boxes), adapted rather than transcribed, commit `9ebe0889` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
+| `crates/interchange/src/scene/import/properties.rs` (`interpolation`) | Pedro Anisio Silva (scene-render) | scene-render `crates/sr-eval/src/curve.rs` (`resolve`: named CSS control points, temporal-handle resolution), adapted rather than transcribed, commit `55ee9d1f` | MIT OR Apache-2.0 (author's grant of 2026-10-13) |
 
 ## Vendored specifications
 

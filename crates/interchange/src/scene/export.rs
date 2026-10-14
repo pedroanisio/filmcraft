@@ -175,6 +175,25 @@ fn scale(t: Tick, n: i128, d: i128) -> Option<Tick> {
     i64::try_from(q).ok().filter(|v| v.unsigned_abs() <= Tick::MAX.0 as u64).map(Tick)
 }
 
+// Inverse of TrackItem::effect_time_at, including its exclusive reverse source end.
+fn animation_time(clip: &TrackItem, media: Tick, floor: bool) -> Result<Tick> {
+    let (n, d) = ratio(clip.speed.abs()).ok_or_else(|| failure("animation needs a finite nonzero clip speed"))?;
+    let origin = if clip.reverse {
+        add(clip.source_in, scale(clip.duration, n, d).ok_or_else(|| failure("animation source span overflow"))?)
+            .and_then(|t| t.0.checked_sub(1).map(Tick))
+            .ok_or_else(|| failure("animation source end overflow"))?
+    } else {
+        clip.source_in
+    };
+    let delta = if clip.reverse { origin.0.checked_sub(media.0) } else { media.0.checked_sub(origin.0) };
+    let time = if floor {
+        delta.and_then(|t| i128::from(t).checked_mul(d)).and_then(|t| t.checked_div_euclid(n)).and_then(|t| i64::try_from(t).ok()).map(Tick)
+    } else {
+        delta.and_then(|t| scale(Tick(t), d, n))
+    };
+    time.ok_or_else(|| failure("animation time overflow"))
+}
+
 fn window(start: Tick, duration: Tick) -> Option<Tick> {
     let end = add(start, duration)?;
     if start.0 < 0 || duration.0 <= 0 || end.0 > MAX_TIME {
@@ -480,14 +499,28 @@ impl Exporter<'_> {
         Ok(())
     }
 
-    fn animation(&mut self, out: &mut Xml, param: Option<&Param>, property: &str, component: Option<bool>, factor: f64, offset: f64) -> Result<()> {
+    fn animation(
+        &mut self,
+        out: &mut Xml,
+        param: Option<&Param>,
+        property: &str,
+        component: Option<bool>,
+        conversion: (f64, f64),
+        clip: Option<&TrackItem>,
+    ) -> Result<()> {
+        let (factor, offset) = conversion;
         let Some(param) = param.filter(|p| !p.keyframes.is_empty()) else {
             return Ok(());
         };
         self.spend(param.keyframes.len())?;
         let mut keys = Xml::default();
         let mut previous = None;
-        for (index, key) in param.keyframes.iter().enumerate() {
+        let reverse = clip.is_some_and(|c| c.reverse);
+        for order in 0..param.keyframes.len() {
+            let index = if reverse { param.keyframes.len().saturating_sub(order).saturating_sub(1) } else { order };
+            let key = param.keyframes.get(index).ok_or_else(|| failure("missing animation key"))?;
+            let reverse_hold = reverse && index.checked_sub(1).and_then(|i| param.keyframes.get(i)).is_some_and(|k| k.interp == Interpolation::Hold);
+            let key_time = clip.map_or(Ok(key.time), |c| animation_time(c, key.time, reverse_hold))?;
             let value = match component {
                 Some(y) => key.value.as_vec2().map(|p| if y { p.y } else { p.x }),
                 None => key.value.as_f64(),
@@ -496,11 +529,11 @@ impl Exporter<'_> {
                 self.report.warn("non-finite or unsupported animation key dropped");
                 continue;
             };
-            if previous.is_some_and(|t| t >= key.time) {
+            if previous.is_some_and(|t| t >= key_time) {
                 self.report.warn("non-increasing animation key dropped");
                 continue;
             }
-            let Ok(time) = seconds(key.time) else {
+            let Ok(time) = seconds(key_time) else {
                 self.report.warn("unrepresentable animation time dropped");
                 continue;
             };
@@ -513,17 +546,53 @@ impl Exporter<'_> {
                 self.report.warn("animation value clipped to the scene property range");
             }
             let value = bounded;
-            previous = Some(key.time);
+            previous = Some(key_time);
             keys.push("<key")?;
             keys.time("time", time)?;
             keys.attr("value", value)?;
-            let next = param.keyframes.get(index.saturating_add(1));
-            let curve = curve(key, next, self.report);
-            keys.attr("interpolation", curve.0)?;
-            if let Some(points) = curve.1 {
-                keys.attr("bezier", points)?;
+            let (kind, points) = if reverse {
+                index.checked_sub(1).and_then(|i| param.keyframes.get(i)).map_or(("linear", None), |previous| {
+                    let (kind, points) = curve(previous, Some(key), self.report);
+                    (kind, points.map(|[x1, y1, x2, y2]| [1.0 - x2, 1.0 - y2, 1.0 - x1, 1.0 - y1]))
+                })
+            } else {
+                curve(key, param.keyframes.get(index.saturating_add(1)), self.report)
+            };
+            keys.attr("interpolation", kind)?;
+            if let Some([x1, y1, x2, y2]) = points {
+                keys.attr("bezier", format!("{x1},{y1},{x2},{y2}"))?;
             }
             keys.push("/>\n")?;
+            if reverse
+                && kind == "hold"
+                && let Some(held) = index.checked_sub(1).and_then(|i| param.keyframes.get(i))
+            {
+                let time = add(key_time, Tick(1)).ok_or_else(|| failure("reversed hold boundary overflow"))?;
+                let end = clip.map_or(Ok(held.time), |c| animation_time(c, held.time, false))?;
+                if time < end {
+                    let value = match component {
+                        Some(y) => held.value.as_vec2().map(|p| if y { p.y } else { p.x }),
+                        None => held.value.as_f64(),
+                    }
+                    .filter(|v| v.is_finite())
+                    .map(|v| v * factor + offset)
+                    .filter(|v| v.is_finite())
+                    .ok_or_else(|| failure("invalid reversed hold value"))?;
+                    let value = match property {
+                        "opacity" | "volume" => value.clamp(0., 1.),
+                        "gain" => value.clamp(-120., 24.),
+                        _ => value,
+                    };
+                    self.spend(1)?;
+                    keys.push("<key")?;
+                    keys.time("time", seconds(time)?)?;
+                    keys.attr("value", value)?;
+                    keys.attr("interpolation", "hold")?;
+                    keys.push("/>\n")?;
+                    previous = Some(time);
+                    self.report.info("Reversed hold boundary baked to adjacent local ticks");
+                }
+            }
         }
         if !keys.text.is_empty() {
             out.push("<animate")?;
@@ -548,11 +617,11 @@ impl Exporter<'_> {
             ("rotation", "rotation", None, 1.0),
             ("scale", "scaleY", None, factor / 100.0),
         ] {
-            self.animation(out, effect.and_then(|e| e.param(param)), property, component, scale, 0.0)?;
+            self.animation(out, effect.and_then(|e| e.param(param)), property, component, (scale, 0.0), Some(clip))?;
         }
         let sx = if boolean(effect, "uniform_scale", true) { "scale" } else { "scale_width" };
-        self.animation(out, effect.and_then(|e| e.param(sx)), "scaleX", None, factor / 100.0, 0.0)?;
-        self.animation(out, clip.effect("opacity").filter(|e| e.enabled).and_then(|e| e.param("opacity")), "opacity", None, 0.01, 0.0)
+        self.animation(out, effect.and_then(|e| e.param(sx)), "scaleX", None, (factor / 100.0, 0.0), Some(clip))?;
+        self.animation(out, clip.effect("opacity").filter(|e| e.enabled).and_then(|e| e.param("opacity")), "opacity", None, (0.01, 0.0), Some(clip))
     }
 
     fn picture(&mut self, out: &mut Xml, clip: &TrackItem, frame: (u32, u32), visible: bool) -> Result<Option<String>> {
@@ -921,10 +990,10 @@ impl Exporter<'_> {
             ("scale", "scaleY", None, 0.01, 0.0),
             ("opacity", "opacity", None, 0.01, 0.0),
         ] {
-            self.animation(&mut node, effect.param(param), property, component, factor, offset)?;
+            self.animation(&mut node, effect.param(param), property, component, (factor, offset), None)?;
         }
         let sx = if boolean(Some(effect), "uniform_scale", true) { "scale" } else { "scale_width" };
-        self.animation(&mut node, effect.param(sx), "scaleX", None, 0.01, 0.0)?;
+        self.animation(&mut node, effect.param(sx), "scaleX", None, (0.01, 0.0), None)?;
         node.push(if text { "</layer>\n" } else { "</shape>\n" })?;
         out.append(node)?;
         for (name, param) in &effect.params {
@@ -1082,7 +1151,7 @@ impl Exporter<'_> {
                             self.report.warn("unrepresentable nested audio key skipped");
                         }
                     }
-                    self.animation(out, Some(&mapped), "gain", None, 1.0, base_gain)?;
+                    self.animation(out, Some(&mapped), "gain", None, (1.0, base_gain), None)?;
                 }
                 out.push("</audioTrack>\n")?;
             }
@@ -1194,7 +1263,7 @@ fn valid_language(language: &str) -> bool {
         && parts.all(|p| !p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
-fn curve(key: &Keyframe, next: Option<&Keyframe>, report: &mut Report) -> (&'static str, Option<String>) {
+fn curve(key: &Keyframe, next: Option<&Keyframe>, report: &mut Report) -> (&'static str, Option<[f64; 4]>) {
     if key.interp == Interpolation::Hold {
         return ("hold", None);
     }
@@ -1217,7 +1286,7 @@ fn curve(key: &Keyframe, next: Option<&Keyframe>, report: &mut Report) -> (&'sta
     let y1 = if outgoing { 0.0 } else { 1.0 / 3.0 };
     let x2 = if incoming { 1.0 - influence(next.map_or(1.0 / 3.0, |k| k.in_influence)) } else { 2.0 / 3.0 };
     let y2 = if incoming { 1.0 } else { 2.0 / 3.0 };
-    ("cubic-bezier", Some(format!("{x1},{y1},{x2},{y2}")))
+    ("cubic-bezier", Some([x1, y1, x2, y2]))
 }
 
 /// Export a sequence without I/O, reporting content the scene format cannot carry.

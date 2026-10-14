@@ -295,11 +295,33 @@ fn scene_import_css_bezier_and_local_keys_under_group_clock() {
     let group = clips(&p, "g")[0];
     let nested = p.project.sequence(group.item).unwrap();
     let child = nested.video_tracks.iter().flat_map(|t| &t.items).find(|c| c.name == "a").unwrap();
-    let keys = &child.effect("opacity").unwrap().param("opacity").unwrap().keyframes;
-    assert_eq!(keys.iter().map(|k| k.time).collect::<Vec<_>>(), vec![sec(0), sec(2)]);
-    assert_eq!(keys[0].interp, filmcraft_project::Interpolation::EaseIn);
-    assert_eq!(keys[0].out_influence, 1. / 3.);
+    let opacity = child.effect("opacity").unwrap().param("opacity").unwrap();
+    let keys = &opacity.keyframes;
+    // One composition second at 25 fps gives 25 intervals, including both endpoint keys.
+    assert_eq!(keys.len(), 26);
+    assert_eq!(keys.first().unwrap().time, sec(0));
+    assert_eq!(keys.last().unwrap().time, sec(2));
+    assert!(keys.iter().all(|k| k.interp == filmcraft_project::Interpolation::Linear));
+    for frame in 1..25 {
+        // At composition 4 + frame/25, the group clock is 4 + 2*frame/25:
+        // segment progress is frame/25 and the media clock is 2*frame/25 seconds.
+        let progress = f64::from(frame) / 25.;
+        // Independently invert x(s)=1.26s+0.48s²-0.74s³ with Newton iteration;
+        // CSS (0.42,0,1,1) gives y(s)=3s²-2s³. No production solver is used.
+        let mut s = progress;
+        for _ in 0..16 {
+            let x = s * (1.26 + s * (0.48 - 0.74 * s));
+            let derivative = 1.26 + s * (0.96 - 2.22 * s);
+            s -= (x - progress) / derivative;
+        }
+        assert!((s * (1.26 + s * (0.48 - 0.74 * s)) - progress).abs() < 1e-12);
+        let expected = 100. * s * s * (3. - 2. * s);
+        let media_time = Tick(2 * TICKS_PER_SECOND * i64::from(frame) / 25);
+        let actual = opacity.f64_at(media_time);
+        assert!((actual - expected).abs() < 1e-6, "frame {frame}: {actual} != {expected}");
+    }
     assert!(r.mentions("CSS bezier"));
+    assert!(r.mentions("baked at sequence frame rate"));
     assert!(r.mentions("spatialOut"));
 }
 #[test]

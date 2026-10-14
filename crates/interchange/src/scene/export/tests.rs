@@ -562,11 +562,11 @@ fn scene_export_inexact_source_and_animation() {
     c.source_in = imprecise_time();
     c.effect_mut("opacity").unwrap().params.get_mut("opacity").unwrap().keyframes = vec![Keyframe::new(imprecise_time(), ParamValue::Float(50.0))];
     let (xml, report) = output(&b, id);
-    // Source in/out and one key are inexact; all timeline edges are integers.
+    // Source in/out are inexact; the media key equals the in-point, so local time is exactly zero.
     near_time(&xml, "layer", "clipIn", imprecise_time());
     near_time(&xml, "layer", "clipOut", imprecise_time() + t(4));
-    near_time(&xml, "key", "time", imprecise_time());
-    assert!(report.mentions("3 time(s) beyond exact f64 tick precision"));
+    near_time(&xml, "key", "time", Tick::ZERO);
+    assert!(report.mentions("2 time(s) beyond exact f64 tick precision"));
 }
 
 #[test]
@@ -639,4 +639,35 @@ fn scene_export_inexact_audio_and_metadata() {
     // Audio 3, marker 2, cue 2, project duration 1 = 8 written inexact times.
     assert!(report.mentions("8 time(s) beyond exact f64 tick precision"), "{report}");
     assert_eq!(report.to_string().matches("beyond exact f64 tick precision").count(), 1);
+}
+
+#[test]
+fn scene_export_media_keys_speed_two() {
+    let (mut b, id) = fixture();
+    let c = &mut b.p.sequence_mut(id).unwrap().video_tracks[0].items[0];
+    c.source_in = t(4);
+    c.speed = 2.;
+    c.effect_mut("opacity").unwrap().params.get_mut("opacity").unwrap().keyframes =
+        vec![Keyframe::new(t(6), ParamValue::Float(20.)), Keyframe::new(t(8), ParamValue::Float(80.))];
+    let (xml, _) = output(&b, id);
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    let times: Vec<_> = doc.root().descendants().filter(|n| n.has_tag_name("key")).map(|n| values::seconds(n.attribute("time").unwrap()).unwrap()).collect();
+    // Local = (media - 4s)/2, hence 1s and 2s.
+    assert_eq!(times, vec![t(1), t(2)]);
+}
+
+#[test]
+fn scene_export_media_keys_reverse_and_outside() {
+    let (mut b, id) = fixture();
+    let c = &mut b.p.sequence_mut(id).unwrap().video_tracks[0].items[0];
+    c.source_in = t(4);
+    c.speed = 2.;
+    c.reverse = true;
+    c.effect_mut("opacity").unwrap().params.get_mut("opacity").unwrap().keyframes =
+        vec![Keyframe::new(t(2) - Tick(1), ParamValue::Float(20.)), Keyframe::new(t(14) - Tick(1), ParamValue::Float(80.))];
+    let (xml, _) = output(&b, id);
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    let times: Vec<_> = doc.root().descendants().filter(|n| n.has_tag_name("key")).map(|n| values::seconds(n.attribute("time").unwrap()).unwrap()).collect();
+    // Reverse media = 4s + 4s*2 - 1 tick - local*2. Both outside keys survive.
+    assert_eq!(times, vec![t(-1), t(5)]);
 }

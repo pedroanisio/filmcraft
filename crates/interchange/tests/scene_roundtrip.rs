@@ -213,13 +213,11 @@ fn filmcraft_opacity_ease() {
 }
 
 #[test]
-#[ignore = "import approximates exported CSS ease: quarter fade is 26.5625%, expected 29.375%"]
 fn filmcraft_opacity_ease_curve() {
     opacity_case(false, true);
 }
 
 #[test]
-#[ignore = "export writes media-time opacity keys as local: source-in 2s at speed 2 moves key 2s to 6s"]
 fn filmcraft_trimmed_speed_opacity_ease() {
     opacity_case(true, true);
 }
@@ -557,4 +555,38 @@ proptest! {
     fn random_2997fps(entries in prop::collection::vec((any::<u32>(), any::<u32>(), any::<u32>()), 1..9)) { random_roundtrip(2, &entries); }
     #[test]
     fn random_48khz(entries in prop::collection::vec((any::<u32>(), any::<u32>(), any::<u32>()), 1..9)) { random_roundtrip(3, &entries); }
+}
+
+#[test]
+fn filmcraft_all_eases_at_frames_forward_and_reverse() {
+    for reverse in [false, true] {
+        for interpolation in Interpolation::ALL {
+            let (mut p, id, clip) = fixture();
+            let c = p.sequence_mut(id).unwrap().find_item_mut(clip).unwrap().1;
+            c.source_in = sec(4);
+            c.speed = 2.;
+            c.reverse = reverse;
+            let param = c.effect_mut("opacity").unwrap().params.get_mut("opacity").unwrap();
+            // Four seconds of video consume [4,12). Off-interval endpoints also exercise retention.
+            param.keyframes = vec![
+                Keyframe::new(sec(2), ParamValue::Float(10.)),
+                Keyframe::new(sec(8), ParamValue::Float(90.)),
+                Keyframe::new(sec(14), ParamValue::Float(30.)),
+            ];
+            for key in &mut param.keyframes {
+                key.interp = interpolation;
+                key.in_influence = 0.4;
+                key.out_influence = 0.2;
+            }
+            let q = roundtrip(&p, id);
+            let a = p.sequence(id).unwrap().find_item(clip).unwrap().1;
+            let b = content(sequence(&q), TrackKind::Video)[0][0];
+            for frame in 0..96 {
+                let time = a.start + Tick(TICKS_PER_SECOND * frame / 24);
+                let av = a.effect("opacity").unwrap().param("opacity").unwrap().f64_at(a.effect_time_at(time));
+                let bv = b.effect("opacity").unwrap().param("opacity").unwrap().f64_at(b.effect_time_at(time));
+                assert!((av - bv).abs() < 1e-6, "{interpolation:?} reverse={reverse} frame={frame}: {av} != {bv}");
+            }
+        }
+    }
 }
