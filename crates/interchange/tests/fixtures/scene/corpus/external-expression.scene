@@ -1,0 +1,15 @@
+<!-- Original synthetic regression, FilmCraft contributors, MIT OR Apache-2.0.
+     XSD expressionType permits propAtTime to reference a sibling's property.
+     At t=0.5, linear interpolation from x=0 to x=16 gives x=8. The pure
+     importer must retain both nodes as an overlay without evaluating it. -->
+<scene version="1.7">
+  <project width="64" height="64" fps="24" duration="1"/>
+  <composition>
+    <shape id="source" shape="rect" width="16" height="16" fill="#FFFFFF">
+      <animate property="x"><key time="0" value="0"/><key time="1" value="16"/></animate>
+    </shape>
+    <shape id="subject" shape="rect" width="16" height="16" fill="#204060">
+      <expression property="x">propAtTime('source.x', 0.5)</expression>
+    </shape>
+  </composition>
+</scene>

@@ -1,0 +1,11 @@
+<!-- Original synthetic regression, FilmCraft contributors, MIT OR Apache-2.0.
+     Programs may supply ids at build time (SREP 87); pure import must retain
+     the program and expression as an overlay, without executing the program.
+     g1 is intentionally not a literal DOM id. The hash is test data only. -->
+<scene version="1.7">
+  <project width="64" height="64" fps="24" duration="1"/>
+  <composition>
+    <program id="maker" src="original.wasm" sha256="0000000000000000000000000000000000000000000000000000000000000000"/>
+    <shape id="subject" shape="rect" width="16" height="16" fill="#204060"><expression property="x">prop('g1.x')</expression></shape>
+  </composition>
+</scene>

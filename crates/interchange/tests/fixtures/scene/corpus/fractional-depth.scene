@@ -1,0 +1,7 @@
+<!-- Original synthetic regression, FilmCraft contributors, MIT OR Apache-2.0.
+     XSD cameraType/z is xs:double, unlike the integer stacking z of 2D nodes.
+     A camera at -0.5 is valid; strict import must preserve it in an overlay. -->
+<scene version="1.7">
+  <project width="64" height="64" fps="24" duration="1"/>
+  <composition><camera id="view" z="-0.5"/></composition>
+</scene>

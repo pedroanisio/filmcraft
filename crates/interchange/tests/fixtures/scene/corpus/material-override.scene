@@ -1,0 +1,10 @@
+<!-- Original synthetic regression, FilmCraft contributors, MIT OR Apache-2.0.
+     XSD object3DType/materialOverride and SCH MOV2: the id after the colon
+     names a material. The overlay must carry that material, even though the
+     attribute is xs:string rather than IDREF. No mesh is opened by import. -->
+<scene version="1.7">
+  <project width="64" height="64" fps="24" duration="1"/>
+  <assets><mesh id="model" src="original.glb" format="glb"/></assets>
+  <materials><material id="paint" baseColor="#204060"/></materials>
+  <composition><object3D id="object" primitive="mesh" mesh="model" materialOverride="surface:paint"/></composition>
+</scene>

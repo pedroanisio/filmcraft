@@ -1,0 +1,10 @@
+<!-- Original synthetic regression, FilmCraft contributors, MIT OR Apache-2.0.
+     XSD videoAssetType/hasAudio and layerType/volume: one video layer gives
+     one video clip and one linked audio clip. Transparent background adds none.
+     Export and re-import must keep two content clips, not add a muted duplicate
+     alongside the explicit audioMix clip. Both intervals are exactly 24 frames. -->
+<scene version="1.7">
+  <project width="64" height="64" fps="24" duration="1" background="#00000000"/>
+  <assets><video id="source" src="original.mov" width="64" height="64" fps="24" duration="1" hasAudio="true"/></assets>
+  <composition><layer id="clip" asset="source"/></composition>
+</scene>

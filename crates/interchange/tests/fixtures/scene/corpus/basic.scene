@@ -1,0 +1,8 @@
+<!-- Original synthetic test data, FilmCraft contributors, MIT OR Apache-2.0.
+     XSD layerType: one image layer [0, 1) at 24 fps is one 24-frame clip.
+     Transparent background adds no matte. No external media is read. -->
+<scene version="1.7">
+  <project width="640" height="360" fps="24" duration="1" background="#00000000"/>
+  <assets><image id="picture" src="original-test.png" width="16" height="16"/></assets>
+  <composition><layer id="clip" asset="picture" start="0" end="1"/></composition>
+</scene>

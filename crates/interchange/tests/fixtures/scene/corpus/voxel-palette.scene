@@ -1,0 +1,9 @@
+<!-- Original synthetic regression, FilmCraft contributors, MIT OR Apache-2.0.
+     XSD object3DType/palette and SCH VOX6 allow a list of material ids.
+     The one referenced material must survive overlay dependency selection. -->
+<scene version="1.7">
+  <project width="64" height="64" fps="24" duration="1"/>
+  <assets><voxelAsset id="model" src="original.vox" maxCells="8"/></assets>
+  <materials><material id="paint" baseColor="#204060"/></materials>
+  <composition><object3D id="object" primitive="voxels" voxels="model" palette="paint"/></composition>
+</scene>

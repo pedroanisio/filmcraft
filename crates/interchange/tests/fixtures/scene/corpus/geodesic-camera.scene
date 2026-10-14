@@ -1,0 +1,8 @@
+<!-- Original synthetic regression, FilmCraft contributors, MIT OR Apache-2.0.
+     SCH BH5 requires a blackHole for a geodesic camera. Both nodes are present;
+     overlay isolation must keep this implicit dependency. Integer z isolates
+     this failure from the fractional-depth regression. -->
+<scene version="1.7">
+  <project width="64" height="64" fps="24" duration="1"/>
+  <composition><camera id="view" z="-10" geodesics="true"/><blackHole id="hole" mass="1"/></composition>
+</scene>

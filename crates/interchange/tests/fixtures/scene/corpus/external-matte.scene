@@ -1,0 +1,11 @@
+<!-- Original synthetic regression, FilmCraft contributors, MIT OR Apache-2.0.
+     XSD nodeCoreAttributes/matte permits any node's alpha to gate another node.
+     Two sibling shapes with an acyclic reference are valid. Overlay closure
+     must retain the referenced sibling instead of refusing the document. -->
+<scene version="1.7">
+  <project width="64" height="64" fps="24" duration="1"/>
+  <composition>
+    <shape id="mask" shape="rect" width="16" height="16" fill="#FFFFFF"/>
+    <shape id="subject" shape="rect" width="16" height="16" fill="#204060" matte="mask"/>
+  </composition>
+</scene>
