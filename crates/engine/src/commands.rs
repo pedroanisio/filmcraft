@@ -651,7 +651,11 @@ pub fn import_bytes(s: &mut Session, path: &str, bytes: std::sync::Arc<[u8]>, bi
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
     let identity = crate::relink::identity_of_bytes(&bytes);
     if crate::scene_render::is_scene(path) {
-        let opened = s.media.open_scene_bytes(path, &bytes)?;
+        let opened = if s.services.is_filesystem_backed(path) {
+            s.media.open_scene_bytes(path, &bytes)?
+        } else {
+            crate::scene_render::virtual_placeholder(path, &bytes)?
+        };
         let id = import_source(s, path, name, opened.source, identity, bin)?;
         s.media.scene_warning(id, path, opened.warning.as_deref());
         return Ok(id);

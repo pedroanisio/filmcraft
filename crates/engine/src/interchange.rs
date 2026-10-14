@@ -80,10 +80,61 @@ fn read_fragment(
 }
 
 fn merge(s: &mut Session, fragment: filmcraft_interchange::Imported, report: &filmcraft_interchange::Report, format: Format, name: &str) -> Result<Value> {
-    if format == Format::Scene {
-        s.edit_group(&format!("Import {name}"), |s| merge_and_link(s, fragment, report, format, name))
+    if format != Format::Scene {
+        return merge_and_link(s, fragment, report, format, name);
+    }
+    let before: std::collections::HashSet<ItemId> = s.project.items.keys().copied().collect();
+    let media = s.media.clone();
+    let services = s.services.clone();
+    let mut links = Vec::new();
+    let mut offline = Vec::new();
+    // edit_group retains every intermediate project snapshot. Link inside this single edit so
+    // even a scene with thousands of distinct assets needs only the pre-import undo snapshot.
+    let seqs = s.edit(&format!("Import {name}"), |proj, _| {
+        let seqs = filmcraft_interchange::merge_into(proj, fragment, None);
+        let mut linked_ids = std::collections::HashSet::new();
+        for item in proj.items.values_mut().filter(|item| !before.contains(&item.id)) {
+            let ItemKind::Media(m) = &mut item.kind else { continue };
+            let MediaRef::File { path } = &m.media else { continue };
+            match open_import_media(&media, &*services, path) {
+                Ok((source, warning)) => {
+                    m.info = source.info().clone();
+                    m.offline = false;
+                    m.identity = crate::relink::identity_of(&*services, path).ok();
+                    linked_ids.insert(item.id);
+                    links.push((item.id, path.clone(), source, warning));
+                }
+                Err(_) => offline.push(path.clone()),
+            }
+        }
+        proj.resolve_placed_auto_points(|seq| !before.contains(&seq), |source| !is_file_media(source) || linked_ids.contains(&source.id));
+        Ok(seqs)
+    })?;
+    let linked = links.len();
+    let mut warnings = Vec::new();
+    for (id, path, source, warning) in links {
+        s.media.insert_file(id, &path, source);
+        s.media.scene_warning(id, &path, warning.as_deref());
+        if let Some(warning) = warning {
+            warnings.push(format!("{path}: {warning}"));
+        }
+    }
+    finish_import(s, &seqs, report, format, linked, offline, warnings)
+}
+
+fn open_import_media(
+    media: &crate::media_pool::MediaPool,
+    services: &dyn crate::Services,
+    path: &str,
+) -> filmcraft_media::Result<(filmcraft_media::SharedSource, Option<String>)> {
+    if crate::scene_render::is_scene(path) {
+        crate::scene_render::read(path, services)
+            .and_then(|bytes| {
+                if !services.is_filesystem_backed(path) { crate::scene_render::virtual_placeholder(path, &bytes) } else { media.open_scene_bytes(path, &bytes) }
+            })
+            .map(|opened| (opened.source, opened.warning))
     } else {
-        merge_and_link(s, fragment, report, format, name)
+        media.open_file(path, services).map(|source| (source, None))
     }
 }
 
@@ -123,19 +174,7 @@ fn merge_and_link(
     let mut offline = Vec::new();
     let mut warnings = Vec::new();
     for (id, mpath) in new_media {
-        let opened = if crate::scene_render::is_scene(&mpath) {
-            crate::scene_render::read(&mpath, &*s.services)
-                .and_then(|bytes| {
-                    if !s.services.is_filesystem_backed(&mpath) {
-                        crate::scene_render::virtual_placeholder(&mpath, &bytes)
-                    } else {
-                        s.media.open_scene_bytes(&mpath, &bytes)
-                    }
-                })
-                .map(|opened| (opened.source, opened.warning))
-        } else {
-            s.media.open_file(&mpath, &*s.services).map(|src| (src, None))
-        };
+        let opened = open_import_media(&s.media, &*s.services, &mpath);
         match opened {
             Ok((src, warning)) => {
                 let info = src.info().clone();
@@ -167,6 +206,18 @@ fn merge_and_link(
             Err(_) => offline.push(mpath),
         }
     }
+    finish_import(s, &seqs, report, format, linked, offline, warnings)
+}
+
+fn finish_import(
+    s: &mut Session,
+    seqs: &[ItemId],
+    report: &filmcraft_interchange::Report,
+    format: Format,
+    linked: usize,
+    offline: Vec<String>,
+    warnings: Vec<String>,
+) -> Result<Value> {
     if let Some(&first) = seqs.first() {
         s.state.active_sequence = Some(first);
         if !s.state.open_sequences.contains(&first) {

@@ -465,3 +465,63 @@ fn scene_fix_virtual_storage_independent_of_export_encoding() {
     assert!(!dir.join("argv.log").exists());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn scene_round3_thousand_assets_publish_one_snapshot() {
+    let (mut s, files) = setup(false);
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(1, 1, image::Rgba([31, 91, 151, 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    files.write_file("/virtual/tiny.png", png.get_ref()).unwrap();
+    let assets: String = (0..1000).map(|i| format!(r#"<image id="image{i}" src="tiny.png" width="1" height="1"/>"#)).collect();
+    let document = xml(false).replace("<composition>", &format!("<assets>{assets}</assets><composition>"));
+    files.write_file("/virtual/many.scene", document.as_bytes()).unwrap();
+    for mode in ["native", "hybrid"] {
+        let before = s.project.clone();
+        let undo = s.history.undo.len();
+        let revision = s.revision;
+        let r = s.execute("file.importScene", json!({"path":"/virtual/many.scene","mode":mode})).unwrap();
+        assert_eq!(r["linkedMedia"], 1000);
+        assert_eq!(s.history.undo.len() - undo, 1);
+        // Each Session::edit publishes a project snapshot and increments revision, even if an
+        // edit_group later hides its intermediate undo entries.
+        assert_eq!(s.revision - revision, 1, "scene import must publish only one project snapshot");
+        s.execute("edit.undo", json!({})).unwrap();
+        assert!(Arc::ptr_eq(&s.project, &before), "undo must restore the pre-import snapshot");
+        assert_eq!(s.history.undo.len(), undo);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn scene_round3_virtual_rendered_import_never_spawns_renderer() {
+    for command in ["file.importScene", "file.import"] {
+        let (mut s, dir, path) = overlay_renderer_session(true);
+        // Even a different real document at the same path must never be rendered.
+        std::fs::write(&path, xml(false)).unwrap();
+        let params = if command == "file.importScene" { json!({"path":path,"mode":"rendered"}) } else { json!({"paths":[path]}) };
+        let r = s.execute(command, params).unwrap();
+        assert!(!dir.join("argv.log").exists(), "virtual rendered imports must not probe or spawn the renderer");
+        assert!(r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("filesystem-backed")), "{r}");
+        let id = ItemId(r["items"][0].as_u64().unwrap());
+        let frame = s.source(id).unwrap().video_frame(filmcraft_media::FrameRequest::full(Tick::ZERO)).unwrap();
+        assert_eq!(frame.to_rgba8(), filmcraft_scenerender::placeholder::slate(32, 24).unwrap().to_rgba8());
+        assert!(!dir.join("argv.log").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn scene_round3_filesystem_rendered_import_uses_renderer() {
+    for command in ["file.importScene", "file.import"] {
+        let (mut s, dir, path) = overlay_renderer_session(false);
+        let params = if command == "file.importScene" { json!({"path":path,"mode":"rendered"}) } else { json!({"paths":[path]}) };
+        let r = s.execute(command, params).unwrap();
+        assert!(r.get("warnings").is_none(), "{r}");
+        let id = ItemId(r["items"][0].as_u64().unwrap());
+        let frame = s.source(id).unwrap().video_frame(filmcraft_media::FrameRequest::full(Tick::ZERO)).unwrap();
+        assert_eq!(frame.to_rgba8(), [31, 91, 151, 255].repeat(32 * 24));
+        assert!(std::fs::read_to_string(dir.join("argv.log")).unwrap().contains("render "));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
