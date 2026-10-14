@@ -1940,6 +1940,7 @@ dependencies = [
  "filmcraft-aac",
  "filmcraft-apv",
  "filmcraft-audio-dsp",
+ "filmcraft-bitstream",
  "filmcraft-codecs",
  "filmcraft-color",
  "filmcraft-dnx",
@@ -2111,6 +2112,7 @@ dependencies = [
 name = "filmcraft-media"
 version = "0.7.2"
 dependencies = [
+ "filmcraft-bitstream",
  "filmcraft-color",
  "filmcraft-dng",
  "filmcraft-frame",

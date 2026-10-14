@@ -506,7 +506,7 @@ mod tests {
                     } else if c == ExrCompression::Rle {
                         unpredict(&unrle(data))
                     } else {
-                        unpredict(&crate::deflate::tests::inflate(data).unwrap())
+                        unpredict(&filmcraft_bitstream::flate::zlib_decode(data, want.len()).unwrap())
                     };
                     assert_eq!(got, want, "{c:?} chunk {k}");
                 }
