@@ -135,10 +135,12 @@ fn scene_import_overlay_wrappers_assets_order_and_validation() {
     );
     let (p, o, _) = run(&xml);
     assert_eq!(o.len(), 1);
-    let c = seq(&p).video_tracks.iter().flat_map(|t| &t.items).find(|c| c.item == o[0].item).unwrap();
-    // u=2+(t-2)*2, so u=[4,8) becomes t=[3,5).
-    assert_eq!((c.start, c.duration, c.source_in), (sec(3), sec(2), sec(3)));
-    assert!(seq(&p).video_tracks[2].items.iter().any(|c| c.item == o[0].item));
+    let nest = clips(&p, "clock")[0];
+    let nested = p.project.sequence(nest.item).unwrap();
+    let c = nested.video_tracks.iter().flat_map(|t| &t.items).find(|c| c.item == o[0].item).unwrap();
+    // Global [3,5) becomes nest [2,6); overlay source remains global at half speed.
+    assert_eq!((c.start, c.duration, c.source_in, c.speed), (sec(2), sec(4), sec(3), 0.5));
+    assert!(seq(&p).video_tracks[2].items.iter().any(|c| c.item == nest.item));
     assert_eq!(seq(&p).video_tracks[3].items[0].name, "after");
     let s = std::str::from_utf8(&o[0].document).unwrap();
     let d = read::read(s, &Default::default()).unwrap();
@@ -290,7 +292,10 @@ fn scene_import_css_bezier_and_local_keys_under_group_clock() {
         r#"<group id="g" start="2" end="10" timeOffset="1" timeScale="2"><layer id="a" asset="i" start="4" end="8"><animate property="opacity" timeBase="local"><key time="0" value="0" interpolation="cubic-bezier" bezier="0.42,0,1,1" easeOut="0.9,0.9" spatialOut="3,4"/><key time="2" value="1"/></animate></layer></group>"#,
     ));
     // Composition t=2+u/2. Local keys u=4 and 6 => t=4 and 5; media rate 2 => keys 0 and 2.
-    let keys = &clips(&p, "a")[0].effect("opacity").unwrap().param("opacity").unwrap().keyframes;
+    let group = clips(&p, "g")[0];
+    let nested = p.project.sequence(group.item).unwrap();
+    let child = nested.video_tracks.iter().flat_map(|t| &t.items).find(|c| c.name == "a").unwrap();
+    let keys = &child.effect("opacity").unwrap().param("opacity").unwrap().keyframes;
     assert_eq!(keys.iter().map(|k| k.time).collect::<Vec<_>>(), vec![sec(0), sec(2)]);
     assert_eq!(keys[0].interp, filmcraft_project::Interpolation::EaseIn);
     assert_eq!(keys[0].out_influence, 1. / 3.);

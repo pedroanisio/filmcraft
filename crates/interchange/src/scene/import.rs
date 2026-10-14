@@ -16,10 +16,16 @@ use filmcraft_time::{FrameRate, Tick};
 use roxmltree::Node;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+mod graphic;
+mod group;
+mod meta;
 mod overlay;
 mod properties;
 #[cfg(test)]
+mod s6_tests;
+#[cfg(test)]
 mod tests;
+mod transition;
 
 const MAX_CLIPS: usize = 100_000;
 const MAX_KEYS: usize = 100_000;
@@ -149,6 +155,9 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
     for note in &resolved.notes {
         log.warn(format!("{}: {}", note.code, note.message))?;
     }
+    if resolved.nodes.len().saturating_mul(resolved.transitions.len()) > 2_000_000 {
+        return Err(err("transition occupancy mapping work limit exceeded"));
+    }
     let name = opts.name.as_deref().map(common::file_stem).unwrap_or("Imported Scene");
     let mut b = Builder::new(name);
     let p = &resolved.project;
@@ -173,11 +182,15 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
     let mut overlays = Vec::new();
     let mut roots: HashSet<_> = resolved.unmappable.iter().map(|n| n.node).collect();
     roots.extend(resolved.nodes.iter().filter(|n| n.unsupported.iter().any(|f| f == "expression")).map(|n| n.index));
+    group::overlay_roots(&resolved, &mut roots, &mut log)?;
     if roots.len() > 512 || roots.len().saturating_mul(doc.doc.descendants().count()) > 2_000_000 {
         return Err(err("overlay generation work limit exceeded"));
     }
     let mut covered = HashSet::new();
     let mut output_bytes = 0usize;
+    if resolved.nodes.iter().filter(|n| n.class == NodeClass::Text).count().saturating_mul(doc.doc.descendants().count()) > 2_000_000 {
+        return Err(err("text asset mapping work limit exceeded"));
+    }
     let mut keys = 0usize;
     let mut sampled_keys = 0usize;
     for n in &resolved.nodes {
@@ -221,12 +234,17 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
             let asset = xml.attribute("asset").and_then(|id| assets.get(id)).ok_or_else(|| err("layer asset is missing"))?;
             let segments = segments(&resolved, n, &mut log)?;
             let channels = properties::channels(&doc, &resolved, n, &mut log, &mut sampled_keys)?;
+            let (occupied_start, occupied_end) = transition::occupancy(&resolved, n)?;
             for s in segments {
                 if video.len().saturating_add(audio.len()).saturating_add(2) > MAX_CLIPS {
                     return Err(err("import clip limit exceeded"));
                 }
-                let raw_start = tick(s.comp_start)?;
-                let raw_end = tick(s.comp_end)?;
+                let segment_start = tick(s.comp_start)?;
+                let raw_start = segment_start.max(occupied_start);
+                let raw_end = tick(s.comp_end)?.min(occupied_end);
+                if raw_end <= raw_start {
+                    continue;
+                }
                 let source = tick(s.src_start)?;
                 tick(finite(s.src_start + finite((s.comp_end - s.comp_start) * s.rate)?)?)?;
                 let link = (asset.video && asset.audio).then(|| b.link_id());
@@ -240,7 +258,7 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
                         log.warn(if kind == TrackKind::Video { "Video clip dropped: zero frames" } else { "Audio clip dropped: empty span" })?;
                         continue;
                     }
-                    let phase = scaled_ticks(sub(start, raw_start)?, s.rate.abs())?;
+                    let phase = scaled_ticks(sub(start, segment_start)?, s.rate.abs())?;
                     let source = if s.rate < 0. { sub(source, phase)? } else { add(source, phase)? };
                     let consumed = scaled_ticks(sub(end, start)?, s.rate.abs())?;
                     let source_in =
@@ -259,23 +277,46 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
                     c.audio_stream = asset.audio_stream;
                     properties::apply(&mut c, kind, n, &channels, &mut keys, &mut log)?;
                     if kind == TrackKind::Video {
+                        group::relative_opacity(&mut c, &resolved, n)?;
                         video.push(c);
                     } else {
                         audio.push(c);
                     }
                 }
             }
+        } else if matches!(n.class, NodeClass::Text | NodeClass::Shape(_)) {
+            if let Some(c) = graphic::clip(&doc, &resolved, n, &mut b, &mut log, &mut snaps)? {
+                if video.len().saturating_add(audio.len()) >= MAX_CLIPS {
+                    return Err(err("import clip limit exceeded"));
+                }
+                for e in &c.effects {
+                    for param in e.params.values() {
+                        keys = keys.saturating_add(param.keyframes.len());
+                        output_bytes = output_bytes.saturating_add(match &param.value {
+                            filmcraft_project::ParamValue::Text(s) => s.len(),
+                            filmcraft_project::ParamValue::Curve(v) => v.len().saturating_mul(8),
+                            _ => 0,
+                        });
+                    }
+                }
+                if keys > MAX_KEYS || output_bytes > MAX_OUTPUT {
+                    return Err(err("graphic import output limit exceeded"));
+                }
+                video.push(c);
+            }
         } else {
             match n.class {
-                NodeClass::Group { isolated: true, .. } => log.warn("Unmapped <group> isolation; children flattened")?,
-                NodeClass::Group { .. } | NodeClass::Sequence => {}
+                NodeClass::Group { .. } | NodeClass::Sequence | NodeClass::Transition => {}
                 _ => log.warn(format!("Unmapped <{}>", n.element))?,
             }
         }
     }
     report_unmapped(&doc, &resolved, &mut log)?;
-    place(&mut b, &mut seq, TrackKind::Video, video)?;
+    group::fold(&doc, &resolved, &mut b, &mut video, &mut audio, &mut log, &mut snaps)?;
+    transition::place(&resolved, &mut b, &mut seq, video, &mut log)?;
     place(&mut b, &mut seq, TrackKind::Audio, audio)?;
+    transition::apply(&doc, &resolved, &mut b, &mut seq, &mut log, &mut snaps, None)?;
+    meta::apply(&doc, &resolved, &assets, &mut b, &mut seq, &mut log)?;
     if seq.duration() < duration {
         // Sequence has no independent duration field. A disabled carrier preserves the empty tail.
         let start = seq.duration();
@@ -340,6 +381,9 @@ fn assets(doc: &SceneDoc<'_>, resolved: &Resolved, opts: &ImportOptions, b: &mut
     let Some(container) = doc.root().children().find(|n| n.has_tag_name("assets")) else { return Ok(out) };
     for n in container.children().filter(Node::is_element) {
         let name = n.tag_name().name();
+        if name == "text" {
+            continue;
+        }
         if !matches!(name, "video" | "image" | "audio" | "imageSequence") {
             log.warn(format!("Unmapped asset <{name}>"))?;
             continue;
@@ -508,7 +552,29 @@ fn report_unmapped(doc: &SceneDoc<'_>, resolved: &Resolved, log: &mut Log) -> Re
             continue;
         }
         let name = n.tag_name().name();
-        if matches!(name, "scene" | "project" | "assets" | "composition" | "video" | "image" | "audio" | "imageSequence" | "animate" | "key" | "timeRemap") {
+        if matches!(
+            name,
+            "scene"
+                | "project"
+                | "assets"
+                | "composition"
+                | "video"
+                | "image"
+                | "audio"
+                | "imageSequence"
+                | "animate"
+                | "key"
+                | "timeRemap"
+                | "text"
+                | "markers"
+                | "marker"
+                | "captions"
+                | "captionTrack"
+                | "cue"
+                | "audioMix"
+                | "audioTrack"
+                | "master"
+        ) {
             continue;
         }
         log.warn(format!("Unmapped <{name}>"))?;
@@ -551,19 +617,22 @@ fn scaled_ticks(value: Tick, rate: f64) -> Result<Tick> {
 
 pub(crate) fn drop_overlays(imported: &mut Imported, overlays: &[Overlay]) -> Result<()> {
     let ids: HashSet<_> = overlays.iter().map(|o| o.item).collect();
-    for id in &imported.sequences {
+    let sequences: Vec<_> = imported.project.items.values().filter(|i| i.as_sequence().is_some()).map(|i| i.id).collect();
+    for id in &sequences {
         let Some(seq) = imported.project.sequence_mut(*id) else {
             continue;
         };
         for track in seq.all_tracks_mut() {
+            let removed: HashSet<_> = track.items.iter().filter(|c| ids.contains(&c.item)).map(|c| c.id).collect();
             track.items.retain(|c| !ids.contains(&c.item));
+            track.transitions.retain(|tr| !tr.from.into_iter().chain(tr.to).any(|id| removed.contains(&id)));
         }
     }
     for id in ids {
         imported.project.items.remove(&id);
         imported.project.root.remove_item(id);
     }
-    for id in imported.sequences.clone() {
+    for id in sequences {
         let Some(seq) = imported.project.sequence(id) else {
             continue;
         };
@@ -620,51 +689,57 @@ fn report_attributes(n: Node<'_, '_>, log: &mut Log) -> Result<()> {
                     | "last"
                     | "step"
             ),
-            _ => matches!(
-                a.name(),
-                "id" | "asset"
-                    | "start"
-                    | "end"
-                    | "startMarker"
-                    | "endMarker"
-                    | "clipIn"
-                    | "clipOut"
-                    | "speed"
-                    | "timeStretch"
-                    | "loop"
-                    | "reverse"
-                    | "freezeAt"
-                    | "parent"
-                    | "x"
-                    | "y"
-                    | "anchorX"
-                    | "anchorY"
-                    | "scaleX"
-                    | "scaleY"
-                    | "rotation"
-                    | "opacity"
-                    | "visible"
-                    | "z"
-                    | "volume"
-                    | "mute"
-                    | "width"
-                    | "height"
-                    | "fit"
-                    | "boxWidth"
-                    | "boxHeight"
-                    | "alignX"
-                    | "alignY"
-                    | "alignTo"
-                    | "margin"
-                    | "timeOffset"
-                    | "timeScale"
-                    | "timeGap"
-                    | "threeD"
-            ),
+            _ => mapped_node_attribute(a.name()),
         };
         if !handled {
             log.warn(format!("Unmapped {name}@{}", a.name()))?;
         }
     }
     Ok(())
+}
+
+fn mapped_node_attribute(name: &str) -> bool {
+    matches!(
+        name,
+        "id" | "asset"
+            | "start"
+            | "end"
+            | "startMarker"
+            | "endMarker"
+            | "clipIn"
+            | "clipOut"
+            | "speed"
+            | "timeStretch"
+            | "loop"
+            | "reverse"
+            | "freezeAt"
+            | "parent"
+            | "x"
+            | "y"
+            | "anchorX"
+            | "anchorY"
+            | "scaleX"
+            | "scaleY"
+            | "rotation"
+            | "opacity"
+            | "visible"
+            | "z"
+            | "volume"
+            | "mute"
+            | "width"
+            | "height"
+            | "fit"
+            | "boxWidth"
+            | "boxHeight"
+            | "alignX"
+            | "alignY"
+            | "alignTo"
+            | "margin"
+            | "timeOffset"
+            | "timeScale"
+            | "timeGap"
+            | "isolate"
+            | "name"
+            | "threeD"
+    )
 }
