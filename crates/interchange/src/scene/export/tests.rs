@@ -671,3 +671,453 @@ fn scene_export_media_keys_reverse_and_outside() {
     // Reverse media = 4s + 4s*2 - 1 tick - local*2. Both outside keys survive.
     assert_eq!(times, vec![t(-1), t(5)]);
 }
+
+fn reimport(xml: &str) -> crate::Imported {
+    crate::scene::import(xml.as_bytes(), &crate::ImportOptions::default()).unwrap().0
+}
+
+#[test]
+fn scene_export_linked_audio_once_with_link_and_level() {
+    // XSD layerType: hasAudio adds one linked audio clip; volume scales it, mute silences it.
+    // One second at 24 fps is 24 frames. A half-level input stays 0.5, including when muted.
+    for muted in [false, true] {
+        let xml = format!(
+            r##"<scene version="1.0"><project width="64" height="64" fps="24" duration="1" background="#00000000"/>
+            <assets><video id="v" src="v.mov" width="64" height="64" fps="24" duration="1" hasAudio="true"/></assets>
+            <composition><layer id="v1" asset="v" volume="0.5" mute="{muted}"/></composition></scene>"##
+        );
+        let first = reimport(&xml);
+        let id = first.sequences[0];
+        let mut report = Report::default();
+        let exported = export(&first.project, id, &ExportOptions::default(), &mut report).unwrap();
+        let doc = read::read(&exported, &Limits::default()).unwrap();
+        assert_eq!(doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).count(), 0);
+        assert_eq!(attr(&exported, "video", "hasAudio"), "true");
+        assert_eq!(attr(&exported, "layer", "mute"), muted.to_string());
+        let second = reimport(&exported);
+        let seq = second.project.sequence(second.sequences[0]).unwrap();
+        let video: Vec<_> = seq.video_tracks.iter().flat_map(|t| &t.items).filter(|c| c.link.is_some()).collect();
+        let audio: Vec<_> = seq.audio_tracks.iter().flat_map(|t| &t.items).collect();
+        assert_eq!(video.len(), 1);
+        assert_eq!(audio.len(), 1);
+        assert_eq!(video[0].link, audio[0].link);
+        assert_eq!(audio[0].duration, t(1));
+        assert_eq!(audio[0].start, Tick::ZERO);
+        assert!((audio[0].effect("volume").unwrap().param("level").unwrap().value.as_f64().unwrap() - 20.0 * 0.5_f64.log10()).abs() < 1e-9);
+        assert_eq!(audio[0].gain_db < -120.0, muted);
+    }
+}
+
+#[test]
+fn scene_export_independent_audio_once_and_picture_only() {
+    // audioTrackType places its own source span. Video-only edits must not acquire audio on import.
+    let (mut b, id) = fixture();
+    let (picture, _) = output(&b, id);
+    let imported = reimport(&picture);
+    assert_eq!(imported.project.sequence(imported.sequences[0]).unwrap().audio_tracks.iter().map(|t| t.items.len()).sum::<usize>(), 0);
+    let source = b.p.sequence(id).unwrap().video_tracks[0].items[0].item;
+    let mut track = b.track(TrackKind::Audio, 0);
+    for start in [0, 2] {
+        track.items.push(b.clip(source, TrackKind::Audio, "Independent", t(start), t(1), t(3)));
+    }
+    b.p.sequence_mut(id).unwrap().audio_tracks.push(track);
+    let (xml, _) = output(&b, id);
+    let imported = reimport(&xml);
+    let seq = imported.project.sequence(imported.sequences[0]).unwrap();
+    let audio: Vec<_> = seq.audio_tracks.iter().flat_map(|t| &t.items).collect();
+    assert_eq!(audio.len(), 2);
+    assert!(audio.iter().all(|c| c.link.is_none() && c.source_in == t(3) && c.duration == t(1)));
+    assert_eq!(attr(&xml, "video", "hasAudio"), "false");
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    assert_eq!(doc.root().descendants().filter(|n| n.has_tag_name("audio")).count(), 1);
+}
+
+#[test]
+fn scene_export_oversized_tracks_return_error() {
+    let (mut b, id) = fixture();
+    let track = b.track(TrackKind::Video, 0);
+    b.p.sequence_mut(id).unwrap().video_tracks = vec![track; 100_001];
+    let result = std::panic::catch_unwind(|| export(&b.p, id, &ExportOptions::default(), &mut Report::default()));
+    assert!(result.unwrap().is_err());
+}
+
+#[test]
+fn scene_export_linked_audio_independent_controls_use_mix() {
+    let (mut b, id) = fixture();
+    let source = b.p.sequence(id).unwrap().video_tracks[0].items[0].item;
+    b.p.sequence_mut(id).unwrap().video_tracks[0].items[0].link = Some(7);
+    let mut track = b.track(TrackKind::Audio, 0);
+    let mut clip = b.clip(source, TrackKind::Audio, "Offset audio", t(1), t(2), t(3));
+    clip.link = Some(7);
+    clip.gain_db = 6.0;
+    track.pan = 25.0;
+    track.items.push(clip);
+    b.p.sequence_mut(id).unwrap().audio_tracks.push(track);
+    let (xml, report) = output(&b, id);
+    // layerType cannot express independent source [3,5), start 1, +6dB and pan 0.25.
+    // audioTrackType can: keep one audio placement and explicitly report edit-link loss.
+    let imported = reimport(&xml);
+    let seq = imported.project.sequence(imported.sequences[0]).unwrap();
+    let audio: Vec<_> = seq.audio_tracks.iter().flat_map(|t| &t.items).collect();
+    assert_eq!(audio.len(), 1);
+    assert_eq!(audio[0].start, t(1));
+    assert_eq!(audio[0].source_in, t(3));
+    assert_eq!(audio[0].duration, t(2));
+    assert_eq!(attr(&xml, "audioTrack", "gain"), "6");
+    assert_eq!(attr(&xml, "audioTrack", "pan"), "0.25");
+    assert!(report.to_string().contains("linkage"));
+}
+
+#[test]
+fn scene_export_shared_source_linked_and_unlinked_uses() {
+    let (mut b, id) = fixture();
+    let source = b.p.sequence(id).unwrap().video_tracks[0].items[0].item;
+    b.p.sequence_mut(id).unwrap().video_tracks[0].items[0].link = Some(9);
+    let picture = b.clip(source, TrackKind::Video, "Picture only", t(4), t(1), t(0));
+    b.p.sequence_mut(id).unwrap().video_tracks[0].items.push(picture);
+    let mut track = b.track(TrackKind::Audio, 0);
+    let mut linked = b.clip(source, TrackKind::Audio, "Linked", t(0), t(4), t(0));
+    linked.link = Some(9);
+    track.items.push(linked);
+    track.items.push(b.clip(source, TrackKind::Audio, "Independent", t(4), t(1), t(0)));
+    b.p.sequence_mut(id).unwrap().audio_tracks.push(track);
+    let (xml, _) = output(&b, id);
+    // Three uses of one file: a linked AV pair, picture only, audio only = two audio clips.
+    let imported = reimport(&xml);
+    let seq = imported.project.sequence(imported.sequences[0]).unwrap();
+    let audio: Vec<_> = seq.audio_tracks.iter().flat_map(|t| &t.items).collect();
+    assert_eq!(audio.len(), 2);
+    assert_eq!(audio.iter().filter(|c| c.link.is_some()).count(), 1);
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    assert_eq!(doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).count(), 1);
+}
+
+#[test]
+fn scene_export_effect_traversal_has_separate_finite_budget() {
+    let (b, id) = fixture();
+    let opts = ExportOptions::default();
+    let mut report = Report::default();
+    let mut exporter = Exporter {
+        project: &b.p,
+        opts: &opts,
+        report: &mut report,
+        assets: Xml::default(),
+        asset_ids: BTreeMap::new(),
+        layer_audio: BTreeMap::new(),
+        embedded_audio: BTreeSet::new(),
+        building: vec![id],
+        next: 0,
+        remaining: MAX_NODES,
+        remaining_work: MAX_WORK,
+        minor: 0,
+    };
+    let clip = &b.p.sequence(id).unwrap().video_tracks[0].items[0];
+    // 10,000 default clip inspections emit no extra nodes, but still consume finite work.
+    for _ in 0..10_000 {
+        exporter.unsupported(clip).unwrap();
+    }
+    assert_eq!(exporter.remaining, MAX_NODES);
+    assert!(exporter.remaining_work < MAX_WORK);
+    let left = exporter.remaining_work;
+    exporter.spend_work(left).unwrap();
+    assert!(exporter.spend_work(1).is_err());
+    assert!(exporter.spend_work(usize::MAX).is_err());
+}
+
+#[test]
+fn scene_export_review_video_dissolve_keeps_audio_cut() {
+    // XSD transitionType defaults to audio crossfade. sr-deliver applies its gains and
+    // handles only to video-layer audio; independent audioTrack placements keep a hard cut.
+    // clipIn=1 leaves enough source before the first clip for both transition handles.
+    let first = reimport(
+        r##"<scene version="1.1"><project width="64" height="64" fps="25" duration="2" background="#00000000"/>
+        <assets><video id="v" src="v.mov" width="64" height="64" fps="25" duration="4" hasAudio="true"/></assets>
+        <composition><layer id="a" asset="v" end="1" clipIn="1"/>
+        <layer id="b" asset="v" start="1" end="2" clipIn="2"/>
+        <transition type="crossfade" from="a" to="b" duration="0.4" curve="linear"/></composition></scene>"##,
+    );
+    let native = first.project.sequence(first.sequences[0]).unwrap();
+    assert!(native.audio_tracks.iter().all(|t| t.transitions.is_empty()));
+    let mut report = Report::default();
+    let xml = export(&first.project, first.sequences[0], &ExportOptions::default(), &mut report).unwrap();
+    checked(&xml);
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    let placements: Vec<_> = doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).collect();
+    assert_eq!(placements.len(), 2, "video dissolve must not add audio crossfade or handles");
+    assert!(doc.root().descendants().filter(|n| n.has_tag_name("video")).all(|n| n.attribute("hasAudio") == Some("false")));
+    assert_eq!(doc.root().descendants().filter(|n| n.has_tag_name("transition")).count(), 1);
+    // Half-open audio intervals [0,1), [1,2), sources [1,2), [2,3), unity gain.
+    for (n, start, input, output) in [(placements[0], "0", "1", "2"), (placements[1], "1", "2", "3")] {
+        assert_eq!(n.attribute("start"), Some(start));
+        assert_eq!(n.attribute("clipIn"), Some(input));
+        assert_eq!(n.attribute("clipOut"), Some(output));
+        assert_eq!(n.attribute("gain"), Some("0"));
+        assert_eq!(n.attribute("mute"), Some("false"));
+        assert!(!n.children().any(|c| c.has_tag_name("animate")));
+    }
+    assert!(report.mentions("linkage"));
+    let imported = reimport(&xml);
+    let seq = imported.project.sequence(imported.sequences[0]).unwrap();
+    let audio: Vec<_> = seq.audio_tracks.iter().flat_map(|t| &t.items).collect();
+    assert_eq!(audio.len(), 2);
+    assert!(audio.iter().all(|c| c.link.is_none() && c.duration == t(1)));
+    assert_eq!((audio[0].start, audio[0].source_in), (t(0), t(1)));
+    assert_eq!((audio[1].start, audio[1].source_in), (t(1), t(2)));
+}
+
+#[test]
+fn scene_export_review_duplicate_clip_ids_return_error() {
+    // Distinct sources and link groups must not let a repeated ID select another pair's audio.
+    for duplicate_audio in [false, true] {
+        let (mut b, id) = fixture();
+        let first = b.p.sequence(id).unwrap().video_tracks[0].items[0].clone();
+        b.p.sequence_mut(id).unwrap().video_tracks[0].items[0].link = Some(1);
+        let other = b.file_media(
+            "other",
+            "Other",
+            "/media/b.mov",
+            &MediaSpec { duration: Some(t(30)), video: Some((640, 360, FrameRate::FPS_24)), audio: Some((48000, 2)), ..Default::default() },
+            None,
+        );
+        let mut video = b.track(TrackKind::Video, 1);
+        let mut picture = b.clip(other, TrackKind::Video, "Second", t(0), t(4), t(0));
+        picture.link = Some(2);
+        if !duplicate_audio {
+            picture.id = first.id;
+        }
+        video.items.push(picture);
+        let mut audio = b.track(TrackKind::Audio, 0);
+        for (source, link, gain) in [(first.item, 1, -6.0), (other, 2, -12.0)] {
+            let mut sound = b.clip(source, TrackKind::Audio, "Sound", t(0), t(4), t(0));
+            sound.link = Some(link);
+            sound.gain_db = gain;
+            if duplicate_audio {
+                sound.id = first.id;
+            }
+            audio.items.push(sound);
+        }
+        let seq = b.p.sequence_mut(id).unwrap();
+        seq.video_tracks.push(video);
+        seq.audio_tracks.push(audio);
+        let result = std::panic::catch_unwind(|| export(&b.p, id, &ExportOptions::default(), &mut Report::default()));
+        let error = result.unwrap().expect_err("duplicate clip IDs must fail before AV pairing");
+        assert!(error.to_string().contains("duplicate clip id"), "{error}");
+    }
+}
+
+#[test]
+fn scene_export_review_linked_volume_animation_uses_mix() {
+    let (mut b, id) = fixture();
+    let source = b.p.sequence(id).unwrap().video_tracks[0].items[0].item;
+    b.p.sequence_mut(id).unwrap().video_tracks[0].items[0].link = Some(7);
+    let mut track = b.track(TrackKind::Audio, 0);
+    let mut sound = b.clip(source, TrackKind::Audio, "Animated", t(0), t(4), t(0));
+    sound.link = Some(7);
+    // Identical clocks, zero pan and static gain: animation alone prevents embedding.
+    // audioTrackType gain is dB; source-local keys at 0s and 2s keep -6dB and 0dB.
+    let level = sound.effect_mut("volume").unwrap().params.get_mut("level").unwrap();
+    level.keyframes = vec![Keyframe::new(t(0), ParamValue::Float(-6.0)), Keyframe::new(t(2), ParamValue::Float(0.0))];
+    track.items.push(sound);
+    b.p.sequence_mut(id).unwrap().audio_tracks.push(track);
+    let (xml, report) = output(&b, id);
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    let placements: Vec<_> = doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).collect();
+    assert_eq!(placements.len(), 1);
+    assert_eq!(attr(&xml, "video", "hasAudio"), "false");
+    let animation = placements[0].children().find(|n| n.has_tag_name("animate")).unwrap();
+    assert_eq!(animation.attribute("property"), Some("gain"));
+    assert_eq!(animation.attribute("timeBase"), Some("local"));
+    let keys: Vec<_> = animation.children().filter(|n| n.has_tag_name("key")).map(|n| (n.attribute("time").unwrap(), n.attribute("value").unwrap())).collect();
+    assert_eq!(keys, vec![("0", "-6"), ("2", "0")]);
+    assert!(report.mentions("linkage"));
+}
+
+fn matching_audio(b: &mut Builder, id: ItemId) {
+    let picture = &mut b.p.sequence_mut(id).unwrap().video_tracks[0].items[0];
+    picture.link = Some(7);
+    let picture = picture.clone();
+    let mut track = b.track(TrackKind::Audio, 0);
+    let mut sound = b.clip(picture.item, TrackKind::Audio, "Linked", picture.start, picture.duration, picture.source_in);
+    sound.link = picture.link;
+    sound.speed = picture.speed;
+    sound.reverse = picture.reverse;
+    track.items.push(sound);
+    b.p.sequence_mut(id).unwrap().audio_tracks.push(track);
+}
+
+#[test]
+fn scene_export_review_subframe_linked_audio_uses_mix() {
+    // At 24fps the first frame after .01s is 1/24s; [.01,.02) contains no frame.
+    // audioTrackType keeps these unsnapped intervals, including either edge alone.
+    for (start, end) in [(1, 100), (0, 101), (1, 2)] {
+        let (mut b, id) = fixture();
+        let start = Tick(TICKS_PER_SECOND * start / 100);
+        let end = Tick(TICKS_PER_SECOND * end / 100);
+        let picture = &mut b.p.sequence_mut(id).unwrap().video_tracks[0].items[0];
+        picture.start = start;
+        picture.duration = end - start;
+        picture.source_in = t(5);
+        matching_audio(&mut b, id);
+        let (xml, report) = output(&b, id);
+        let doc = read::read(&xml, &Limits::default()).unwrap();
+        let placements: Vec<_> = doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).collect();
+        assert_eq!(placements.len(), 1, "subframe audio must retain its own clock");
+        assert_eq!(attr(&xml, "video", "hasAudio"), "false");
+        let placement = placements[0];
+        for (name, expected) in [("start", start), ("clipIn", t(5)), ("clipOut", t(5) + end - start)] {
+            assert_eq!(values::seconds(placement.attribute(name).unwrap()).unwrap(), expected);
+        }
+        assert!(report.mentions("linkage"));
+        let imported = reimport(&xml);
+        let audio: Vec<_> = imported.project.sequence(imported.sequences[0]).unwrap().audio_tracks.iter().flat_map(|t| &t.items).collect();
+        assert_eq!(audio.len(), 1);
+        assert_eq!((audio[0].start, audio[0].duration, audio[0].source_in), (start, end - start, t(5)));
+    }
+}
+
+#[test]
+fn scene_export_review_reversed_linked_audio_uses_mix() {
+    let (mut b, id) = fixture();
+    let picture = &mut b.p.sequence_mut(id).unwrap().video_tracks[0].items[0];
+    picture.duration = t(1);
+    picture.source_in = t(5);
+    picture.reverse = true;
+    matching_audio(&mut b, id);
+    let (xml, report) = output(&b, id);
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    // Source [5,6) reversed for 1s must end toward 5, even in frame 23/24.
+    // sr-audio's mapped-clock fallback instead advances from 5+1/24 toward 5+2/24.
+    assert_eq!(doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).count(), 1);
+    assert_eq!(attr(&xml, "video", "hasAudio"), "false");
+    for (name, expected) in [("start", "0"), ("clipIn", "5"), ("clipOut", "6"), ("reverse", "true"), ("speed", "1")] {
+        assert_eq!(attr(&xml, "audioTrack", name), expected);
+    }
+    assert!(report.mentions("linkage"));
+}
+
+#[test]
+fn scene_export_review_varispeed_linked_audio_uses_mix() {
+    for speed in [0.5, 2.0] {
+        let (mut b, id) = fixture();
+        let picture = &mut b.p.sequence_mut(id).unwrap().video_tracks[0].items[0];
+        picture.duration = t(1);
+        picture.source_in = t(5);
+        picture.speed = speed;
+        matching_audio(&mut b, id);
+        let (xml, report) = output(&b, id);
+        let doc = read::read(&xml, &Limits::default()).unwrap();
+        // At 2x the final frame must traverse [6+11/12,7), not stop at 6+23/24.
+        // audioTrackType plays [5,7) at 2x, or [5,5.5) at .5x, with varispeed pitch.
+        assert_eq!(doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).count(), 1);
+        assert_eq!(attr(&xml, "video", "hasAudio"), "false");
+        assert_eq!(attr(&xml, "audioTrack", "clipIn"), "5");
+        assert_eq!(attr(&xml, "audioTrack", "clipOut"), if speed == 2.0 { "7" } else { "5.5" });
+        assert_eq!(attr(&xml, "audioTrack", "speed"), speed.to_string());
+        assert_eq!(attr(&xml, "audioTrack", "reverse"), "false");
+        assert_eq!(attr(&xml, "audioTrack", "preservePitch"), "false");
+        assert!(report.mentions("linkage"));
+    }
+}
+
+#[test]
+fn scene_export_review_independent_varispeed_disables_pitch_preservation() {
+    let (mut b, id) = fixture();
+    matching_audio(&mut b, id);
+    let sound = &mut b.p.sequence_mut(id).unwrap().audio_tracks[0].items[0];
+    sound.link = None;
+    sound.speed = 2.0;
+    let (xml, _) = output(&b, id);
+    // XSD defaults preservePitch to true; native varispeed changes pitch with speed.
+    assert_eq!(attr(&xml, "audioTrack", "preservePitch"), "false");
+}
+
+#[test]
+fn scene_export_review_rational_frame_grid_keeps_linked_audio() {
+    let (mut b, id) = fixture();
+    let seq = b.p.sequence_mut(id).unwrap();
+    seq.settings.frame_rate = FrameRate { num: 30000, den: 1001 };
+    // One frame is exactly 1001/30000 seconds = 8,475,667,200 ticks.
+    let frame = Tick(8_475_667_200);
+    seq.video_tracks[0].items[0].start = frame;
+    seq.video_tracks[0].items[0].duration = frame;
+    matching_audio(&mut b, id);
+    let (xml, report) = output(&b, id);
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    assert_eq!(doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).count(), 0);
+    assert_eq!(attr(&xml, "video", "hasAudio"), "true");
+    assert!(!report.mentions("linkage"));
+}
+
+#[test]
+fn scene_export_review_fractional_boundary_one_frame_uses_mix() {
+    let (mut b, id) = fixture();
+    let seq = b.p.sequence_mut(id).unwrap();
+    seq.settings.frame_rate = FrameRate { num: 24000, den: 1001 };
+    // 1001/24000 seconds = 10,594,584,000 ticks per frame. [9,10) should play
+    // one frame, but 9 / (24000/1001) < the serialized start 0.375375.
+    let frame = Tick(10_594_584_000);
+    seq.video_tracks[0].items[0].start = Tick(9 * frame.0);
+    seq.video_tracks[0].items[0].duration = frame;
+    matching_audio(&mut b, id);
+    let (xml, report) = output(&b, id);
+    let doc = read::read(&xml, &Limits::default()).unwrap();
+    let placements: Vec<_> = doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).collect();
+    assert_eq!(placements.len(), 1, "frame 9 must not lose all its audio to float rounding");
+    assert_eq!(attr(&xml, "video", "hasAudio"), "false");
+    assert_eq!(placements[0].attribute("start"), Some("0.375375"));
+    assert_eq!(values::seconds(placements[0].attribute("clipOut").unwrap()).unwrap(), frame);
+    assert!(report.mentions("linkage"));
+    let imported = reimport(&xml);
+    let audio: Vec<_> = imported.project.sequence(imported.sequences[0]).unwrap().audio_tracks.iter().flat_map(|t| &t.items).collect();
+    assert_eq!(audio.len(), 1);
+    assert_eq!((audio[0].start, audio[0].duration, audio[0].source_in), (Tick(9 * frame.0), frame, Tick::ZERO));
+}
+
+#[test]
+fn scene_export_review_fractional_boundary_sweep() {
+    let mut unsafe_embedded = Vec::new();
+    let mut embedded_count = 0;
+    let mut independent_count = 0;
+    for num in [24000, 30000, 60000] {
+        for first in (0..128).chain([999, 10_000, 1_000_000]) {
+            for length in [1, 7] {
+                let (mut b, id) = fixture();
+                let seq = b.p.sequence_mut(id).unwrap();
+                seq.settings.frame_rate = FrameRate { num, den: 1001 };
+                let frame = TICKS_PER_SECOND * 1001 / num;
+                seq.video_tracks[0].items[0].start = Tick(first * frame);
+                seq.video_tracks[0].items[0].duration = Tick(length * frame);
+                matching_audio(&mut b, id);
+                let (xml, report) = output(&b, id);
+                let doc = read::read(&xml, &Limits::default()).unwrap();
+                let layer = doc.root().descendants().find(|n| n.has_tag_name("layer")).unwrap();
+                let start: f64 = layer.attribute("start").unwrap().parse().unwrap();
+                let end: f64 = layer.attribute("end").unwrap().parse().unwrap();
+                let fps = num as f64 / 1001.0;
+                // sr-deliver samples k/fps; sr-eval uses [start,end). Every frame
+                // in the intended interval, and neither neighbor, must be active.
+                let safe = (first.saturating_sub(1)..=first + length).all(|k| {
+                    let time = k as f64 / fps;
+                    (time >= start && time < end) == (k >= first && k < first + length)
+                });
+                let placements: Vec<_> = doc.root().descendants().filter(|n| n.has_tag_name("audioTrack")).collect();
+                if attr(&xml, "video", "hasAudio") == "true" {
+                    embedded_count += 1;
+                    assert!(placements.is_empty());
+                    assert!(!report.mentions("linkage"));
+                    if !safe {
+                        unsafe_embedded.push((num, first, length));
+                    }
+                } else {
+                    independent_count += 1;
+                    assert_eq!(placements.len(), 1);
+                    assert!(report.mentions("linkage"));
+                    assert_eq!(values::seconds(placements[0].attribute("start").unwrap()).unwrap(), Tick(first * frame));
+                    assert_eq!(values::seconds(placements[0].attribute("clipOut").unwrap()).unwrap(), Tick(length * frame));
+                }
+            }
+        }
+    }
+    assert!(unsafe_embedded.is_empty(), "unsafe embedded (fps numerator, first frame, length): {unsafe_embedded:?}");
+    assert!(embedded_count > 0 && independent_count > 0, "exercise safe embedding and fallback");
+}

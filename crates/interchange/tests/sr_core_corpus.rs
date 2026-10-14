@@ -482,20 +482,10 @@ fn scene_corpus_hostile_documents() {
     for case in hostile_documents() {
         pipeline(&case, None, &mut summary);
     }
-    summary.failures.retain(|failure| {
-        let known = known_failure(failure, "10000-siblings", &SIBLINGS_REGRESSION);
-        if known {
-            summary
-                .skipped
-                .push("10000-siblings: S11 export budget counts default effect parameters; covered by ignored scene_corpus_10000_siblings_export".into());
-        }
-        !known
-    });
     summary.finish("hostile scene documents");
 }
 
 #[test]
-#[ignore = "S11: 10000 imported siblings exceed export's budget for default effect parameters"]
 fn scene_corpus_10000_siblings_export() {
     let case = hostile_documents().into_iter().find(|c| c.name == "10000-siblings").unwrap();
     let mut summary = Summary::default();
@@ -587,14 +577,7 @@ const KNOWN_REGRESSIONS: &[KnownRegression] = &[
     KnownRegression { file: "geodesic-camera", stage: "import", codes: &["BH5"], message: None },
     KnownRegression { file: "voxel-palette", stage: "import", codes: &["VOX6"], message: None },
     KnownRegression { file: "generated-id", stage: "import", codes: &[], message: Some("sr-core scene parse error: overlay dependency g1 is missing") },
-    KnownRegression { file: "linked-audio", stage: "re-import", codes: &[], message: Some("clip count 2 -> 3, only 0 reported clip losses") },
 ];
-const SIBLINGS_REGRESSION: KnownRegression = KnownRegression {
-    file: "10000-siblings",
-    stage: "export",
-    codes: &[],
-    message: Some("scene export: expanded content exceeds the 100,000 item export budget"),
-};
 
 macro_rules! regression_test {
     ($name:ident, $file:literal, $cause:literal) => {
@@ -613,7 +596,10 @@ regression_test!(scene_corpus_material_override, "material-override", "S11: over
 regression_test!(scene_corpus_geodesic_camera, "geodesic-camera", "S11: overlay closure loses the implicit blackHole dependency");
 regression_test!(scene_corpus_voxel_palette, "voxel-palette", "S11: overlay closure loses palette material ids");
 regression_test!(scene_corpus_generated_id, "generated-id", "S11: overlay closure treats program-generated ids as missing DOM ids");
-regression_test!(scene_corpus_linked_audio, "linked-audio", "S11: exported audioMix and video audio create duplicate linked audio");
+#[test]
+fn scene_corpus_linked_audio() {
+    regression("linked-audio", include_str!("fixtures/scene/corpus/linked-audio.scene"));
+}
 regression_test!(scene_corpus_external_expression, "external-expression", "S11: overlay closure rejects valid sibling dependencies");
 
 #[test]

@@ -3,11 +3,12 @@
 //! Emitted version gates (scene-render.sch; XSD introduction notes permit new attributes on 1.0
 //! elements): markers and captions → 1.1 (V1); transitions → 1.1 (V3). All other emitted constructs
 //! (media/text assets, layers, shapes, groups, animate/key, audioMix/audioTrack) are available in 1.0.
-//! Audio clips use audioMix tracks; picture clips always mute their asset's implicit audio.
+//! Matching linked AV clips use the video's own audio. Independent audio uses audioMix tracks
+//! with audio-only assets, so a picture layer cannot create an extra audio placement.
 
 #![cfg_attr(not(test), deny(clippy::indexing_slicing))]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Write};
 
 use filmcraft_media::MediaKind;
@@ -21,6 +22,8 @@ use super::{Limits, read, validate, values};
 use crate::{Error, ExportOptions, Report, Result};
 
 const MAX_NODES: usize = 100_000;
+// Default effects expand each imported clip into many project parameters, not XML nodes.
+const MAX_WORK: usize = 4_000_000;
 const MAX_XML: usize = 32 << 20;
 const MAX_VALUE: usize = 65_536;
 const MAX_DEPTH: usize = 32;
@@ -208,6 +211,32 @@ fn rate(rate: FrameRate) -> Result<String> {
     Ok(text)
 }
 
+fn safe_audio_frame_boundary(time: Tick, rate: FrameRate) -> bool {
+    if time.0 < 0 || rate.num <= 0 || rate.den <= 0 {
+        return false;
+    }
+    let frame_ticks = i128::from(TICKS_PER_SECOND) * i128::from(rate.den);
+    let Some(scaled) = i128::from(time.0).checked_mul(i128::from(rate.num)) else {
+        return false;
+    };
+    if scaled % frame_ticks != 0 {
+        return false;
+    }
+    let Some(serialized) = seconds(time).ok().and_then(|s| s.text.parse::<f64>().ok()).filter(|s| s.is_finite()) else {
+        return false;
+    };
+    let fps = rate.num as f64 / rate.den as f64;
+    if !fps.is_finite() || fps <= 0.0 {
+        return false;
+    }
+    let frame = scaled / frame_ticks;
+    let current = frame as f64 / fps;
+    let previous = (frame - 1) as f64 / fps;
+    // sr-deliver evaluates k/fps; sr-eval uses [start,end). Decimal Tick alignment
+    // alone can exclude the first frame or include the exclusive end at NTSC rates.
+    current.is_finite() && previous.is_finite() && previous < serialized && serialized <= current
+}
+
 pub(crate) fn sniff(bytes: &[u8]) -> bool {
     if !read::sniff(bytes) {
         return false;
@@ -283,11 +312,28 @@ struct Exporter<'a> {
     opts: &'a ExportOptions,
     report: &'a mut Report,
     assets: Xml,
-    asset_ids: BTreeMap<ItemId, String>,
+    asset_ids: BTreeMap<(ItemId, AssetUse), String>,
+    layer_audio: BTreeMap<ClipId, LayerAudio>,
+    embedded_audio: BTreeSet<ClipId>,
     building: Vec<ItemId>,
     next: usize,
     remaining: usize,
+    remaining_work: usize,
     minor: u8,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum AssetUse {
+    Picture,
+    Linked,
+    Audio,
+}
+
+#[derive(Clone, Copy)]
+struct LayerAudio {
+    clip: ClipId,
+    volume: f64,
+    muted: bool,
 }
 
 impl Exporter<'_> {
@@ -306,6 +352,11 @@ impl Exporter<'_> {
 
     fn spend(&mut self, count: usize) -> Result<()> {
         self.remaining = self.remaining.checked_sub(count).ok_or_else(|| failure("expanded content exceeds the 100,000 item export budget"))?;
+        Ok(())
+    }
+
+    fn spend_work(&mut self, count: usize) -> Result<()> {
+        self.remaining_work = self.remaining_work.checked_sub(count).ok_or_else(|| failure("project traversal exceeds the 4,000,000 item export budget"))?;
         Ok(())
     }
 
@@ -352,8 +403,8 @@ impl Exporter<'_> {
         None
     }
 
-    fn asset(&mut self, id: ItemId) -> Result<Option<String>> {
-        if let Some(asset) = self.asset_ids.get(&id) {
+    fn asset(&mut self, id: ItemId, usage: AssetUse) -> Result<Option<String>> {
+        if let Some(asset) = self.asset_ids.get(&(id, usage)) {
             return Ok(Some(asset.clone()));
         }
         let Some(media) = self.project.item(id).and_then(|i| i.as_media()) else {
@@ -370,8 +421,8 @@ impl Exporter<'_> {
             self.report.warn("image sequence media without an explicit filename pattern skipped");
             return Ok(None);
         }
-        let video = media.info.video.as_ref();
-        let still = media.info.kind == MediaKind::Still;
+        let video = media.info.video.as_ref().filter(|_| usage != AssetUse::Audio);
+        let still = media.info.kind == MediaKind::Still && usage != AssetUse::Audio;
         if let Some(v) = video {
             if filmcraft_project::validate_frame_size(v.width, v.height).is_err() || rate(v.frame_rate).is_err() {
                 self.report.warn("media with invalid dimensions or frame rate skipped");
@@ -404,7 +455,7 @@ impl Exporter<'_> {
             if !still {
                 out.attr("fps", rate(v.frame_rate)?)?;
                 out.time("duration", seconds(media.info.duration)?)?;
-                out.attr("hasAudio", media.info.has_audio())?;
+                out.attr("hasAudio", usage == AssetUse::Linked && media.info.has_audio())?;
             }
         } else if let Some(audio) = media.info.audio() {
             if audio.sample_rate > 0 {
@@ -421,7 +472,7 @@ impl Exporter<'_> {
         }
         out.push("/>\n")?;
         self.assets.append(out)?;
-        self.asset_ids.insert(id, asset.clone());
+        self.asset_ids.insert((id, usage), asset.clone());
         if media.interpret != Default::default() {
             self.report.warn("media interpretation overrides dropped");
         }
@@ -429,9 +480,10 @@ impl Exporter<'_> {
     }
 
     fn unsupported(&mut self, clip: &TrackItem) -> Result<()> {
-        self.spend(clip.effects.len().saturating_add(clip.markers.len()))?;
+        self.spend(clip.markers.len())?;
+        self.spend_work(clip.effects.len())?;
         for e in &clip.effects {
-            self.spend(e.params.len().saturating_add(e.masks.len()))?;
+            self.spend_work(e.params.len().saturating_add(e.masks.len()))?;
             for _ in &e.masks {
                 self.report.warn("effect mask dropped");
             }
@@ -677,7 +729,9 @@ impl Exporter<'_> {
             self.report.warn("unrepresentable source time skipped");
             return Ok(None);
         }
-        let asset = if !group { self.asset(base)? } else { None };
+        let linked = if self.building.len() == 1 { self.layer_audio.get(&clip.id).copied() } else { None };
+        let usage = if linked.is_some() { AssetUse::Linked } else { AssetUse::Picture };
+        let asset = if !group { self.asset(base, usage)? } else { None };
         if !group && asset.is_none() {
             return Ok(None);
         }
@@ -696,7 +750,10 @@ impl Exporter<'_> {
             }
             node.attr("speed", speed)?;
             node.attr("reverse", clip.reverse ^ (clip.speed < 0.0))?;
-            node.attr("mute", true)?;
+            node.attr("mute", linked.is_none_or(|audio| audio.muted))?;
+            if let Some(audio) = linked {
+                node.attr("volume", audio.volume)?;
+            }
             node.attr(
                 "frameBlend",
                 match clip.time_interpolation {
@@ -750,11 +807,17 @@ impl Exporter<'_> {
             node.push("</group>\n")?;
         }
         out.append(node)?;
+        if let Some(audio) = linked {
+            self.embedded_audio.insert(audio.clip);
+        }
         Ok(Some(id))
     }
 
     fn sequence(&mut self, out: &mut Xml, seq: &Sequence) -> Result<()> {
         self.spend(seq.video_tracks.len().saturating_add(seq.audio_tracks.len()).saturating_add(seq.caption_tracks.len()).saturating_add(seq.markers.len()))?;
+        if self.building.len() == 1 {
+            self.prepare_layer_audio(seq)?;
+        }
         if seq.multicam.is_some() || seq.merged.is_some() {
             self.report.warn("multicam or merged sequence metadata dropped");
         }
@@ -1017,6 +1080,112 @@ impl Exporter<'_> {
         Ok(())
     }
 
+    fn prepare_layer_audio(&mut self, seq: &Sequence) -> Result<()> {
+        let mut ids = BTreeSet::new();
+        let mut transition_sides = BTreeSet::new();
+        for track in seq.all_tracks() {
+            self.spend_work(track.items.len().saturating_add(track.transitions.len()))?;
+            for clip in &track.items {
+                if !ids.insert(clip.id) {
+                    return Err(failure("duplicate clip id in sequence"));
+                }
+            }
+            for transition in &track.transitions {
+                if transition.effect.enabled {
+                    transition_sides.extend(transition.from.into_iter().chain(transition.to));
+                }
+            }
+        }
+        let mut pictures: BTreeMap<u64, Option<&TrackItem>> = BTreeMap::new();
+        let mut sounds: BTreeMap<u64, Option<(&TrackItem, &Track)>> = BTreeMap::new();
+        for track in &seq.video_tracks {
+            self.spend_work(track.items.len())?;
+            for clip in &track.items {
+                if let Some(link) = clip.link {
+                    pictures.entry(link).and_modify(|pair| *pair = None).or_insert(track.enabled.then_some(clip));
+                }
+            }
+        }
+        for track in &seq.audio_tracks {
+            self.spend_work(track.items.len())?;
+            for clip in &track.items {
+                if let Some(link) = clip.link {
+                    sounds.entry(link).and_modify(|pair| *pair = None).or_insert(Some((clip, track)));
+                }
+            }
+        }
+        let solo = seq.audio_tracks.iter().any(|track| track.solo);
+        for (link, picture) in pictures {
+            let (Some(picture), Some(Some((sound, track)))) = (picture, sounds.get(&link)) else {
+                continue;
+            };
+            // Scene transitions add audio handles and default crossfade gains to their layers.
+            // Until native audio transitions can be matched, keep these placements independent.
+            if transition_sides.contains(&picture.id) || transition_sides.contains(&sound.id) {
+                continue;
+            }
+            let Some(end) = window(picture.start, picture.duration) else {
+                continue;
+            };
+            // sr-deliver samples layer clocks on frame boundaries; sr-audio extrapolates
+            // their final frame at forward 1x. Other clocks need independent placements.
+            if !safe_audio_frame_boundary(picture.start, seq.settings.frame_rate)
+                || !safe_audio_frame_boundary(end, seq.settings.frame_rate)
+                || picture.speed != 1.0
+                || picture.reverse
+            {
+                continue;
+            }
+            // layerType has one media clock, linear volume <= 1, and no pan or general edit link.
+            if picture.item != sound.item
+                || picture.start != sound.start
+                || picture.duration != sound.duration
+                || picture.source_in != sound.source_in
+                || picture.speed != sound.speed
+                || picture.reverse != sound.reverse
+                || picture.frame_hold.is_some()
+                || sound.frame_hold.is_some()
+                || !picture.enabled
+                || sound.audio_stream != 0
+                || !sound.source_channels.is_empty()
+                || track.pan != 0.0
+            {
+                continue;
+            }
+            let Some(base) = self.base(picture.item) else {
+                continue;
+            };
+            if !self
+                .project
+                .item(base)
+                .and_then(|item| item.as_media())
+                .is_some_and(|media| media.info.kind != MediaKind::Still && media.info.video.is_some() && media.info.has_audio())
+            {
+                continue;
+            }
+            self.spend_work(sound.effects.len())?;
+            let effect = sound.effect("volume").filter(|e| e.enabled && !boolean(Some(e), "bypass", false));
+            let level = effect.and_then(|e| e.param("level"));
+            if level.is_some_and(|p| p.is_animated()) {
+                continue;
+            }
+            let level = level.and_then(|p| p.value.as_f64()).unwrap_or(0.0);
+            if ![sound.gain_db, track.volume_db, seq.master_volume_db, level].into_iter().all(f64::is_finite) {
+                continue;
+            }
+            // Import stores layer mute in clip gain; keep its independent volume while muted.
+            let gain = if sound.gain_db <= -120.0 { 0.0 } else { sound.gain_db };
+            let gain = gain + track.volume_db + seq.master_volume_db + level;
+            if !gain.is_finite() || gain > 0.0 {
+                continue;
+            }
+            let volume = if gain <= -120.0 { 0.0 } else { 10_f64.powf(gain / 20.0) };
+            let muted = sound.gain_db <= -120.0 || !sound.enabled || !track.enabled || track.muted || (solo && !track.solo);
+            self.layer_audio.insert(picture.id, LayerAudio { clip: sound.id, volume, muted });
+        }
+        Ok(())
+    }
+
     fn audio(&mut self, seq: &Sequence) -> Result<Xml> {
         let mut out = Xml::default();
         let clock = AudioClock { low: Tick::ZERO, high: Tick(MAX_TIME), root: Tick::ZERO, n: 1, d: 1, gain: 0.0, muted: false };
@@ -1041,6 +1210,9 @@ impl Exporter<'_> {
             let strip_gain = clock.gain + self.number(track.volume_db, 0.0) + self.number(seq.master_volume_db, 0.0);
             for clip in &track.items {
                 self.unsupported(clip)?;
+                if self.building.len() == 1 && self.embedded_audio.contains(&clip.id) {
+                    continue;
+                }
                 let Some(end) = self.interval(clip.start, clip.duration) else {
                     continue;
                 };
@@ -1114,9 +1286,12 @@ impl Exporter<'_> {
                     self.report.warn("audio speed below the scene minimum skipped");
                     continue;
                 }
-                let Some(asset) = self.asset(base)? else {
+                let Some(asset) = self.asset(base, AssetUse::Audio)? else {
                     continue;
                 };
+                if clip.link.is_some() {
+                    self.report.warn("AV edit linkage not retained; audio kept as an independent audioMix track");
+                }
                 out.push("<audioTrack")?;
                 out.attr("id", self.id())?;
                 out.attr("asset", asset)?;
@@ -1124,6 +1299,7 @@ impl Exporter<'_> {
                 out.time("clipIn", input)?;
                 out.time("clipOut", output)?;
                 out.attr("speed", speed)?;
+                out.attr("preservePitch", false)?;
                 out.attr("reverse", reverse)?;
                 if gain > 24.0 {
                     self.report.warn("audio gain clipped to scene's +24 dB limit");
@@ -1300,9 +1476,12 @@ pub(crate) fn export(p: &Project, seq_id: ItemId, opts: &ExportOptions, report: 
         report,
         assets: Xml::default(),
         asset_ids: BTreeMap::new(),
+        layer_audio: BTreeMap::new(),
+        embedded_audio: BTreeSet::new(),
         building: vec![seq_id],
         next: 0,
         remaining: MAX_NODES,
+        remaining_work: MAX_WORK,
         minor: 0,
     };
     let mut body = Xml::default();
