@@ -165,6 +165,14 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
     let mut seq = common::empty_sequence(settings.clone());
     let sequence = b.reserve_sequence(name, settings, None);
     let assets = assets(&doc, &resolved, opts, &mut b, &mut log)?;
+    let audio_resolved = resolve_audio_layers(&doc, &resolved, &assets)?;
+    if let Some(audio) = &audio_resolved {
+        for note in &audio.notes {
+            if note.node.and_then(|i| resolved.node(i)).is_some_and(|n| n.source.is_none()) {
+                log.warn(format!("{}: {}", note.code, note.message))?;
+            }
+        }
+    }
     let duration = tick(p.duration)?;
     let mut video = Vec::new();
     let mut audio = Vec::new();
@@ -186,55 +194,70 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
     if roots.len() > 512 || roots.len().saturating_mul(doc.doc.descendants().count()) > 2_000_000 {
         return Err(err("overlay generation work limit exceeded"));
     }
-    let mut covered = HashSet::new();
-    let mut output_bytes = 0usize;
+    let plans = overlay::prepare(&doc, &resolved, &roots, opts)?;
+    let mut output_bytes = plans.iter().fold(0usize, |bytes, p| bytes.saturating_add(p.document.len()));
+    let covered: HashSet<_> = plans.iter().flat_map(|p| p.covered.iter().copied()).collect();
+    let whole_composition = plans.iter().any(|p| p.root.is_none());
+    let mut plans: HashMap<_, _> = plans.into_iter().map(|p| (p.anchor, p)).collect();
     if resolved.nodes.iter().filter(|n| n.class == NodeClass::Text).count().saturating_mul(doc.doc.descendants().count()) > 2_000_000 {
         return Err(err("text asset mapping work limit exceeded"));
     }
     let mut keys = 0usize;
     let mut sampled_keys = 0usize;
     for n in &resolved.nodes {
-        if n.parent.is_some_and(|parent| covered.contains(&parent)) {
-            covered.insert(n.index);
-            continue;
-        }
-        if roots.contains(&n.index) {
-            covered.insert(n.index);
-            let start = snaps.edge(tick(n.interval.start)?, p.fps)?;
-            let end = snaps.edge(tick(n.interval.end)?, p.fps)?;
+        if let Some(plan) = plans.remove(&n.index) {
+            let root = plan.root.and_then(|i| resolved.node(i));
+            let interval = root.map_or(resolve::Interval { start: 0., end: p.duration }, |n| n.interval);
+            let start = snaps.edge(tick(interval.start)?, p.fps)?;
+            let end = snaps.edge(tick(interval.end)?, p.fps)?;
             if end <= start {
                 log.warn("Video clip dropped: zero frames")?;
+            } else {
+                let name = root.map_or("Scene Composition", |n| n.id.as_str());
+                let overlay::Plan { path, document, has_audio, .. } = plan;
+                let item = b.file_media(
+                    &format!("@overlay-{}", n.index),
+                    name,
+                    &path,
+                    &MediaSpec { duration: Some(duration), video: Some((p.width, p.height, p.fps)), ..Default::default() },
+                    None,
+                );
+                if let Some(m) = b.p.item_mut(item).and_then(|i| i.as_media_mut()).and_then(|m| m.info.video.as_mut()) {
+                    m.has_alpha = true;
+                }
+                let mut clip = b.clip(item, TrackKind::Video, name, start, sub(end, start)?, start);
+                clip.enabled = root.is_none_or(|n| n.visible);
+                video.push(clip);
+                log.warn(format!("Unmapped <{}>: preserved in scene overlay", n.element))?;
+                if has_audio {
+                    log.warn("Scene overlay contains audio; native media audio is mapped separately, but generated or symbol audio is not mixed")?;
+                }
+                overlays.push(Overlay { item, path, document });
+            }
+        }
+        let covered_video = covered.contains(&n.index);
+        let xml = xml_node(&doc, n)?;
+        let media_asset = xml.has_tag_name("layer").then(|| xml.attribute("asset").and_then(|id| assets.get(id))).flatten();
+        if matches!(n.class, NodeClass::Media(_)) || media_asset.is_some_and(|a| a.audio) {
+            let asset = media_asset.ok_or_else(|| err("layer asset is missing"))?;
+            if xml.ancestors().skip(1).any(|p| p.has_tag_name("repeat")) {
+                // The resolver visits repeat templates, not the renderer's expanded
+                // occurrences. A template has neither a guaranteed count nor a clock.
+                if asset.audio {
+                    log.warn("Audio in <repeat> is not mapped: expanded occurrence timing is unavailable; template soundtrack omitted")?;
+                }
                 continue;
             }
-            let (path, document, has_audio) = overlay::document(&doc, &resolved, n, opts)?;
-            output_bytes = output_bytes.saturating_add(document.len());
-            if output_bytes > MAX_OUTPUT {
-                return Err(err("aggregate overlay byte limit exceeded"));
+            // A recovered source span can shift every later sequence child,
+            // including layers that already had a source map in the visual pass.
+            let mapping = if asset.audio { audio_resolved.as_ref().unwrap_or(&resolved) } else { &resolved };
+            let n = mapping.node(n.index).filter(|m| m.xml == n.xml && m.id == n.id).ok_or_else(|| err("audio node identity changed during resolution"))?;
+            if covered_video && !asset.audio {
+                continue;
             }
-            let item = b.file_media(
-                &format!("@overlay-{}", n.index),
-                &n.id,
-                &path,
-                &MediaSpec { duration: Some(duration), video: Some((p.width, p.height, p.fps)), ..Default::default() },
-                None,
-            );
-            if let Some(m) = b.p.item_mut(item).and_then(|i| i.as_media_mut()).and_then(|m| m.info.video.as_mut()) {
-                m.has_alpha = true;
-            }
-            let mut clip = b.clip(item, TrackKind::Video, &n.id, start, sub(end, start)?, start);
-            clip.enabled = n.visible;
-            video.push(clip);
-            log.warn(format!("Unmapped <{}>: preserved in scene overlay", n.element))?;
-            if has_audio {
-                log.warn("Scene overlay contains audio; overlay clips are video-only and this audio is not mixed")?;
-            }
-            overlays.push(Overlay { item, path, document });
-        } else if matches!(n.class, NodeClass::Media(_)) {
-            let xml = xml_node(&doc, n)?;
-            let asset = xml.attribute("asset").and_then(|id| assets.get(id)).ok_or_else(|| err("layer asset is missing"))?;
-            let segments = segments(&resolved, n, &mut log)?;
-            let channels = properties::channels(&doc, &resolved, n, &mut log, &mut sampled_keys)?;
-            let (occupied_start, occupied_end) = transition::occupancy(&resolved, n)?;
+            let segments = segments(mapping, n, &mut log)?;
+            let channels = properties::channels(&doc, mapping, n, &mut log, &mut sampled_keys)?;
+            let (occupied_start, occupied_end) = transition::occupancy(mapping, n)?;
             for s in segments {
                 if video.len().saturating_add(audio.len()).saturating_add(2) > MAX_CLIPS {
                     return Err(err("import clip limit exceeded"));
@@ -247,8 +270,8 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
                 }
                 let source = tick(s.src_start)?;
                 tick(finite(s.src_start + finite((s.comp_end - s.comp_start) * s.rate)?)?)?;
-                let link = (asset.video && asset.audio).then(|| b.link_id());
-                for (kind, enabled) in [(TrackKind::Video, asset.video), (TrackKind::Audio, asset.audio)] {
+                let link = (asset.video && asset.audio && !covered_video).then(|| b.link_id());
+                for (kind, enabled) in [(TrackKind::Video, asset.video && !covered_video), (TrackKind::Audio, asset.audio)] {
                     if !enabled {
                         continue;
                     }
@@ -284,6 +307,8 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
                     }
                 }
             }
+        } else if covered_video {
+            continue;
         } else if matches!(n.class, NodeClass::Text | NodeClass::Shape(_)) {
             if let Some(c) = graphic::clip(&doc, &resolved, n, &mut b, &mut log, &mut snaps)? {
                 if video.len().saturating_add(audio.len()) >= MAX_CLIPS {
@@ -312,7 +337,9 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
         }
     }
     report_unmapped(&doc, &resolved, &mut log)?;
-    group::fold(&doc, &resolved, &mut b, &mut video, &mut audio, &mut log, &mut snaps)?;
+    if !whole_composition {
+        group::fold(&doc, &resolved, &mut b, &mut video, &mut audio, &mut log, &mut snaps)?;
+    }
     transition::place(&resolved, &mut b, &mut seq, video, &mut log)?;
     place(&mut b, &mut seq, TrackKind::Audio, audio)?;
     transition::apply(&doc, &resolved, &mut b, &mut seq, &mut log, &mut snaps, None)?;
@@ -338,6 +365,44 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
     snaps.finish(&mut log)?;
     fill_unknown_durations(&mut b.p)?;
     Ok((Imported { project: b.p, sequences: vec![sequence] }, overlays, log.finish()))
+}
+
+// Reuse the bounded semantic pass for soundtracks whose visuals are 3D. Changing
+// only attribute values preserves XML node identities, clocks and source controls.
+// This runs at most once per import; the original document still drives overlays.
+fn resolve_audio_layers(doc: &SceneDoc<'_>, resolved: &Resolved, assets: &HashMap<String, Asset>) -> Result<Option<Resolved>> {
+    let mut has_audio = false;
+    let mut needs_timing = false;
+    for n in &resolved.nodes {
+        let xml = xml_node(doc, n)?;
+        if !xml.has_tag_name("layer") || xml.ancestors().any(|p| p.has_tag_name("repeat")) {
+            continue;
+        }
+        if let Some(asset) = xml.attribute("asset").and_then(|id| assets.get(id)) {
+            has_audio |= asset.audio;
+            // Silent media also advance the sequence cursor before later audio.
+            needs_timing |= n.source.is_none();
+        }
+    }
+    if !has_audio || !needs_timing {
+        return Ok(None);
+    }
+    let input = doc.doc.input_text();
+    let mut output = String::new();
+    let mut cursor = 0usize;
+    for xml in doc.doc.descendants().filter(|n| n.has_tag_name("layer")) {
+        if !xml.attribute("asset").is_some_and(|id| assets.contains_key(id)) || !flag(xml, "threeD", false)? {
+            continue;
+        }
+        let range = xml.attribute_node("threeD").ok_or_else(|| err("missing 3D attribute"))?.range_value();
+        output.push_str(input.get(cursor..range.start).ok_or_else(|| err("invalid audio attribute range"))?);
+        output.push('0');
+        cursor = range.end;
+    }
+    output.push_str(input.get(cursor..).ok_or_else(|| err("invalid audio document range"))?);
+    // Each replacement shrinks its value; the copy is capped by the input budget.
+    let audio_doc = read::read(&output, &Default::default())?;
+    resolve::resolve(&audio_doc, &Default::default()).map(Some)
 }
 
 fn fill_unknown_durations(project: &mut filmcraft_project::Project) -> Result<()> {

@@ -566,41 +566,37 @@ struct KnownRegression {
     message: Option<&'static str>,
 }
 
-const KNOWN_REGRESSIONS: &[KnownRegression] = &[
-    KnownRegression { file: "material-override", stage: "import", codes: &["MOV2"], message: None },
-    KnownRegression {
-        file: "external-expression",
-        stage: "import",
-        codes: &[],
-        message: Some("sr-core scene parse error: overlay dependency source is outside its subtree; cannot isolate external composition dependency"),
-    },
-    KnownRegression { file: "geodesic-camera", stage: "import", codes: &["BH5"], message: None },
-    KnownRegression { file: "voxel-palette", stage: "import", codes: &["VOX6"], message: None },
-    KnownRegression { file: "generated-id", stage: "import", codes: &[], message: Some("sr-core scene parse error: overlay dependency g1 is missing") },
-];
+// Empty while every corpus case passes; add an entry only with an ignored regression test below.
+const KNOWN_REGRESSIONS: &[KnownRegression] = &[];
 
-macro_rules! regression_test {
-    ($name:ident, $file:literal, $cause:literal) => {
-        #[test]
-        #[ignore = $cause]
-        fn $name() {
-            regression($file, include_str!(concat!("fixtures/scene/corpus/", $file, ".scene")));
-        }
-    };
-}
 #[test]
 fn scene_corpus_fractional_depth() {
     regression("fractional-depth", include_str!("fixtures/scene/corpus/fractional-depth.scene"));
 }
-regression_test!(scene_corpus_material_override, "material-override", "S11: overlay closure loses materialOverride material ids");
-regression_test!(scene_corpus_geodesic_camera, "geodesic-camera", "S11: overlay closure loses the implicit blackHole dependency");
-regression_test!(scene_corpus_voxel_palette, "voxel-palette", "S11: overlay closure loses palette material ids");
-regression_test!(scene_corpus_generated_id, "generated-id", "S11: overlay closure treats program-generated ids as missing DOM ids");
+#[test]
+fn scene_corpus_material_override() {
+    regression("material-override", include_str!("fixtures/scene/corpus/material-override.scene"));
+}
+#[test]
+fn scene_corpus_geodesic_camera() {
+    regression("geodesic-camera", include_str!("fixtures/scene/corpus/geodesic-camera.scene"));
+}
+#[test]
+fn scene_corpus_voxel_palette() {
+    regression("voxel-palette", include_str!("fixtures/scene/corpus/voxel-palette.scene"));
+}
+#[test]
+fn scene_corpus_generated_id() {
+    regression("generated-id", include_str!("fixtures/scene/corpus/generated-id.scene"));
+}
 #[test]
 fn scene_corpus_linked_audio() {
     regression("linked-audio", include_str!("fixtures/scene/corpus/linked-audio.scene"));
 }
-regression_test!(scene_corpus_external_expression, "external-expression", "S11: overlay closure rejects valid sibling dependencies");
+#[test]
+fn scene_corpus_external_expression() {
+    regression("external-expression", include_str!("fixtures/scene/corpus/external-expression.scene"));
+}
 
 #[test]
 fn scene_corpus_external_matte() {

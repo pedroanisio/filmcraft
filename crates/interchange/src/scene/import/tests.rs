@@ -187,7 +187,9 @@ fn scene_import_overlay_sequence_placement_and_transitive_assets() {
         scene(r#"<sequence id="s"><layer id="a" asset="i" end="3"/><group id="fx" threeD="true" end="2"><layer id="inside" asset="i"/></group></sequence>"#);
     let (p, o, _) = run(&xml);
     let c = seq(&p).video_tracks.iter().flat_map(|t| &t.items).find(|c| c.item == o[0].item).unwrap();
-    assert_eq!((c.start, c.duration), (sec(3), sec(2)));
+    // The sequence is retained intact; its carrier covers the enclosing interval.
+    assert_eq!((c.start, c.duration), (sec(0), sec(12)));
+    assert!(clips(&p, "a").is_empty());
     let doc = read::read(std::str::from_utf8(&o[0].document).unwrap(), &Default::default()).unwrap();
     assert!(validate::validate(&doc.doc).iter().all(|d| !d.is_error()));
     let r = resolve::resolve(&doc, &Default::default()).unwrap();
@@ -353,11 +355,83 @@ fn scene_import_overlay_ancestor_reference_does_not_copy_siblings() {
     assert!(validate::validate(&d.doc).iter().all(|d| !d.is_error()));
 }
 #[test]
-fn scene_import_overlay_external_expression_dependency_refused() {
-    // Copying only fx would change prop's value; preserve correctness by refusing an
-    // external composition dependency that this phase cannot isolate.
-    let xml = scene(r#"<layer id="other" asset="i"/><layer id="fx" asset="i"><expression property="opacity">prop('other.opacity')</expression></layer>"#);
-    assert!(import(xml.as_bytes(), &Default::default()).is_err());
+fn scene_import_overlay_external_expression_dependency_preserved_once() {
+    // The dependency promotes fx to the whole composition [0,12). The earlier
+    // overlay and native sibling must each occur once, inside that one overlay.
+    let xml = scene(
+        r#"<layer id="first" asset="i"><expression property="opacity">0.5</expression></layer><layer id="other" asset="i"/><layer id="fx" asset="i" start="3" end="5" visible="false"><expression property="opacity">prop('other.opacity')</expression></layer>"#,
+    );
+    let xml = xml.replace("duration=\"12\"", "duration=\"12\" background=\"#00000000\"");
+    let (p, overlays, _) = run(&xml);
+    assert_eq!(overlays.len(), 1, "promoted overlays must coalesce");
+    let represented: Vec<_> = seq(&p).video_tracks.iter().flat_map(|t| &t.items).filter(|c| c.name != "Scene Background").collect();
+    assert_eq!(represented.len(), 1, "covered native siblings must not render twice");
+    let clip = represented[0];
+    assert_eq!(clip.item, overlays[0].item);
+    assert_eq!((clip.start, clip.duration, clip.source_in, clip.enabled), (sec(0), sec(12), sec(0), true));
+    let doc = read::read(std::str::from_utf8(&overlays[0].document).unwrap(), &Default::default()).unwrap();
+    for id in ["first", "other", "fx"] {
+        assert_eq!(doc.doc.descendants().filter(|n| n.attribute("id") == Some(id)).count(), 1);
+    }
+    assert_overlay_round_trip(&p);
+}
+
+fn assert_overlay_round_trip(p: &Imported) {
+    let (bytes, _) = crate::export(&p.project, p.sequences[0], Format::Scene, &Default::default()).unwrap();
+    let (again, _, _) = import(&bytes, &Default::default()).unwrap();
+    // These fixtures have a transparent background. Re-import adds the XSD's
+    // default matte; exclude it just as the corpus harness does.
+    let before = seq(p).all_tracks().flat_map(|t| &t.items).count();
+    let after = seq(&again).all_tracks().flat_map(|t| &t.items).filter(|c| c.name != "Scene Background").count();
+    assert_eq!(after, before, "export/re-import must keep the clip count");
+}
+
+#[test]
+fn scene_import_overlay_promoted_group_interval_and_clocks() {
+    // Group [2,10), child clock = 2 + (t - 2 - 2)*2 = 2t-6.
+    // Source [4,8) is global [5,7); fx [6,8) is [6,7). Promotion
+    // must keep the whole group [2,10), including its retimed children.
+    let xml = scene(
+        r#"<layer id="before" asset="i"/><group id="clock" start="2" end="10" timeScale="2" timeOffset="2"><layer id="other" asset="i" start="4" end="8"/><group id="nested" isolate="true"><layer id="native" asset="i"/></group><layer id="fx" asset="i" start="6" end="8"><expression property="opacity">prop('other.opacity')</expression></layer></group><layer id="after" asset="i"/>"#,
+    );
+    let xml = xml.replace("duration=\"12\"", "duration=\"12\" background=\"#00000000\"");
+    let (p, overlays, _) = run(&xml);
+    assert_eq!(overlays.len(), 1);
+    let clip = seq(&p).video_tracks.iter().flat_map(|t| &t.items).find(|c| c.item == overlays[0].item).expect("enclosing group must be the overlay carrier");
+    assert_eq!((clip.name.as_str(), clip.start, clip.duration, clip.source_in, clip.speed), ("clock", sec(2), sec(8), sec(2), 1.));
+    assert_eq!(p.project.items.values().filter(|i| i.as_sequence().is_some()).count(), 1, "covered nested groups must not create empty carriers");
+    assert_eq!(seq(&p).video_tracks.iter().flat_map(|t| &t.items).map(|c| c.name.as_str()).collect::<Vec<_>>(), ["before", "clock", "after"]);
+    let doc = read::read(std::str::from_utf8(&overlays[0].document).unwrap(), &Default::default()).unwrap();
+    let r = resolve::resolve(&doc, &Default::default()).unwrap();
+    let source = r.nodes.iter().find(|n| n.id == "other").unwrap();
+    assert_eq!((source.interval.start, source.interval.end), (5., 7.));
+    assert_overlay_round_trip(&p);
+}
+
+#[test]
+fn scene_import_overlay_promoted_sequence_keeps_placement() {
+    // sequence children auto-place: first [0,3), second [3,5).
+    let xml = scene(
+        r#"<sequence id="s"><layer id="first" asset="i" end="3"/><layer id="second" asset="i" end="2"><expression property="opacity">prop('first.opacity')</expression></layer></sequence>"#,
+    );
+    let xml = xml.replace("duration=\"12\"", "duration=\"12\" background=\"#00000000\"");
+    let (p, overlays, _) = run(&xml);
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(clips(&p, "first").len(), 0, "auto-placed sibling is already in the overlay");
+    let clip = seq(&p).video_tracks.iter().flat_map(|t| &t.items).find(|c| c.item == overlays[0].item).unwrap();
+    assert_eq!((clip.name.as_str(), clip.start, clip.duration), ("s", sec(0), sec(12)));
+    let doc = read::read(std::str::from_utf8(&overlays[0].document).unwrap(), &Default::default()).unwrap();
+    let r = resolve::resolve(&doc, &Default::default()).unwrap();
+    let second = r.nodes.iter().find(|n| n.id == "second").unwrap();
+    assert_eq!((second.interval.start, second.interval.end), (3., 5.));
+    assert_overlay_round_trip(&p);
+}
+
+#[test]
+fn scene_import_overlay_dynamic_dependency_refused() {
+    // A computed target cannot be dependency-closed without evaluating expressions.
+    let xml = scene(r#"<layer id="fx" asset="i"><expression property="opacity">prop(target)</expression></layer>"#);
+    assert!(import(xml.as_bytes(), &Default::default()).unwrap_err().to_string().contains("dynamic expression dependency"));
 }
 
 #[test]
@@ -574,16 +648,16 @@ fn scene_import_review_7_overlay_keeps_builtin_uri() {
 }
 
 #[test]
-fn scene_import_review_4_pruned_sequence_keeps_animation() {
+fn scene_import_review_4_retained_sequence_keeps_animation() {
     let xml = scene(
         r#"<sequence id="s"><animate property="opacity"><key time="0" value="0"/><key time="4" value="1"/></animate><layer id="a" asset="i" end="2"/><group id="fx" threeD="true" end="2"><layer id="inside" asset="i"/></group></sequence>"#,
     );
     let (_, overlays, _) = run(&xml);
     let d = read::read(std::str::from_utf8(&overlays[0].document).unwrap(), &Default::default()).unwrap();
     assert!(validate::validate(&d.doc).iter().all(|d| !d.is_error()));
-    let group = d.doc.descendants().find(|n| n.attribute("id") == Some("s")).unwrap();
-    assert!(group.has_tag_name("group"));
-    assert!(group.children().any(|c| c.has_tag_name("animate")));
+    let sequence = d.doc.descendants().find(|n| n.attribute("id") == Some("s")).unwrap();
+    assert!(sequence.has_tag_name("sequence"));
+    assert!(sequence.children().any(|c| c.has_tag_name("animate")));
     let resolved = resolve::resolve(&d, &Default::default()).unwrap();
     let fx = resolved.nodes.iter().find(|n| n.id == "fx").unwrap();
     assert_eq!((fx.interval.start, fx.interval.end), (2., 4.));
@@ -660,4 +734,168 @@ fn scene_import_review_7_caption_model_file_and_name() {
         assert!(validate::validate(&d.doc).iter().all(|d| !d.is_error()));
         assert_eq!(d.doc.descendants().find(|n| n.has_tag_name("captionTrack")).unwrap().attribute("model"), Some(expected));
     }
+}
+
+#[test]
+fn scene_import_overlay_review_covered_audio_survives() {
+    // Video-only overlays must not eat the original soundtrack, even when
+    // the audio-bearing layer is the composition overlay's anchor.
+    for nodes in [
+        r#"<layer id="other" asset="v" start="3" end="5" clipIn="2"/><layer id="fx" asset="i"><expression property="x">prop('other.x')</expression></layer>"#,
+        r#"<group id="clock" start="2" end="10" timeOffset="2" timeScale="2"><layer id="other" asset="v" start="4" end="8" clipIn="2"/><layer id="fx" asset="i"><expression property="x">prop('other.x')</expression></layer></group>"#,
+    ] {
+        let xml = scene(nodes).replace("duration=\"12\"", "duration=\"10\" background=\"#00000000\"");
+        let (p, overlays, _) = run(&xml);
+        assert_eq!(overlays.len(), 1);
+        let audio: Vec<_> = seq(&p).audio_tracks.iter().flat_map(|t| &t.items).collect();
+        assert_eq!(audio.len(), 1, "covered video must retain its audio once");
+        let (start, duration, speed) = if nodes.starts_with("<group") { (sec(5), sec(2), 2.) } else { (sec(3), sec(2), 1.) };
+        assert_eq!((audio[0].start, audio[0].duration, audio[0].source_in, audio[0].speed), (start, duration, sec(2), speed));
+        assert_eq!(audio[0].link, None, "no dangling link to suppressed native video");
+        assert!(clips(&p, "other").is_empty());
+        assert_overlay_round_trip(&p);
+    }
+}
+
+#[test]
+fn scene_import_overlay_review_subframe_audio_survives() {
+    // At 25 fps both edges round to zero, but 1ms of sample-accurate audio remains.
+    let xml = scene(r#"<layer id="tiny" asset="v" start="0.001" end="0.002"><expression property="x">1</expression></layer>"#);
+    let (p, _, _) = run(&xml);
+    let audio: Vec<_> = seq(&p).audio_tracks.iter().flat_map(|t| &t.items).collect();
+    assert_eq!(audio.len(), 1);
+    assert_eq!((audio[0].start, audio[0].duration), (Tick(TICKS_PER_SECOND / 1000), Tick(TICKS_PER_SECOND / 1000)));
+}
+
+#[test]
+fn scene_import_round3_repeat_audio_templates_are_not_occurrences() {
+    // repeatType makes count occurrences; the resolver does not instantiate them.
+    // Until it does, neither zero nor two copies may produce one phantom soundtrack.
+    for count in [0, 2] {
+        for three_d in [false, true] {
+            let xml = scene(&format!(
+                r#"<repeat id="r" count="{count}" timeStep="2"><group id="g"><layer id="a" asset="v" end="2" threeD="{three_d}"/></group></repeat>"#
+            ));
+            let (p, _, report) = run(&xml);
+            assert_eq!(seq(&p).audio_tracks.iter().flat_map(|t| &t.items).count(), 0, "template is not an occurrence: count={count}");
+            assert!(report.mentions("Audio in <repeat> is not mapped"), "report unavailable occurrence timing");
+        }
+    }
+}
+
+#[test]
+fn scene_import_round3_three_d_video_audio_uses_source_clocks() {
+    // child=2t-6: local [4,8) -> global [5,7); clipIn=2, speed=1 -> rate=2.
+    let xml = scene(
+        r#"<group id="g" isolate="true" start="2" end="10" timeOffset="2" timeScale="2"><layer id="a" asset="v" threeD="true" start="4" end="8" clipIn="2"/></group>"#,
+    );
+    let xml = xml.replace("duration=\"12\"", "duration=\"10\" background=\"#00000000\"");
+    let (p, overlays, _) = run(&xml);
+    assert_eq!(overlays.len(), 1);
+    let audio: Vec<_> = seq(&p).audio_tracks.iter().flat_map(|t| &t.items).collect();
+    assert_eq!(audio.len(), 1, "3D video must keep its soundtrack");
+    assert_eq!((audio[0].start, audio[0].duration, audio[0].source_in, audio[0].speed), (sec(5), sec(2), sec(2), 2.));
+    assert!(audio[0].link.is_none());
+    assert_overlay_round_trip(&p);
+}
+
+#[test]
+fn scene_import_round3_three_d_audio_loop_reverse_and_remap() {
+    // Two 2s reverse plays, then a local remap from source 3 to 5 over 2s.
+    for (attrs, child, expected) in [
+        (r#"clipIn="2" clipOut="4" loop="1" reverse="true""#, "", vec![(sec(0), sec(2), Tick(sec(2).0 + 1), true), (sec(2), sec(2), Tick(sec(2).0 + 1), true)]),
+        (r#"end="2" clipIn="8""#, r#"<timeRemap><key time="0" value="3"/><key time="2" value="5"/></timeRemap>"#, vec![(sec(0), sec(2), sec(3), false)]),
+    ] {
+        let (p, _, _) = run(&scene(&format!(r#"<layer id="a" asset="v" threeD="true" {attrs}>{child}</layer>"#)));
+        let audio: Vec<_> = seq(&p).audio_tracks.iter().flat_map(|t| &t.items).map(|c| (c.start, c.duration, c.source_in, c.reverse)).collect();
+        assert_eq!(audio, expected);
+    }
+}
+
+#[test]
+fn scene_import_round4_audio_after_three_d_sequence_child() {
+    // sequenceType places each child after the preceding source span. clipOut=2
+    // means a=[0,2), b=[2,4), even though a's visual class needs an overlay.
+    let xml = scene(r#"<sequence id="sequence"><layer id="a" asset="v" threeD="true" clipOut="2"/><layer id="b" asset="v" clipOut="2"/></sequence>"#)
+        .replace("duration=\"12\"", "duration=\"12\" background=\"#00000000\"");
+    let (p, overlays, _) = run(&xml);
+    let mut audio: Vec<_> = seq(&p).audio_tracks.iter().flat_map(|t| &t.items).collect();
+    audio.sort_by_key(|c| c.start);
+    assert_eq!(audio.len(), 2, "both source spans must keep their soundtrack");
+    assert_eq!(
+        audio.iter().map(|c| (c.name.as_str(), c.start, c.duration, c.source_in)).collect::<Vec<_>>(),
+        vec![("a", sec(0), sec(2), sec(0)), ("b", sec(2), sec(2), sec(0))]
+    );
+    assert_eq!(overlays.len(), 1);
+    assert_overlay_round_trip(&p);
+}
+
+#[test]
+fn scene_import_round4_audio_animation_uses_corrected_sequence_clock() {
+    // a occupies [0,2); b has a local volume ramp over [0,2], hence global
+    // [2,4] and source [0,2]. Check the endpoints and the halfway gain (0.5).
+    let xml = scene(
+        r#"<sequence id="sequence"><layer id="a" asset="v" threeD="true" clipOut="2"/><layer id="b" asset="v" clipOut="2"><animate property="volume" timeBase="local"><key time="0" value="0"/><key time="2" value="1"/></animate></layer></sequence>"#,
+    );
+    let (p, _, _) = run(&xml);
+    let b = seq(&p).audio_tracks.iter().flat_map(|t| &t.items).find(|c| c.name == "b").expect("ordinary audio after the 3D layer");
+    assert_eq!((b.start, b.duration), (sec(2), sec(2)));
+    let volume = b.effect("volume").unwrap().param("level").unwrap();
+    assert_eq!(volume.keyframes.first().unwrap().time, sec(0));
+    assert_eq!(volume.keyframes.last().unwrap().time, sec(2));
+    assert!((volume.f64_at(sec(1)) - 20. * 0.5_f64.log10()).abs() < 1e-6);
+}
+
+#[test]
+fn scene_import_round4_camera_without_target_shares_overlay() {
+    // cameraType: the live camera selects projection implicitly; a camera-only
+    // overlay cannot project the box in a different overlay.
+    for nodes in [
+        r#"<camera id="view" z="-1000" fov="20"/><object3D id="box" primitive="box"/>"#,
+        r#"<object3D id="box" primitive="box"/><camera id="view" z="-1000" fov="20"/>"#,
+    ] {
+        let xml = scene(nodes).replace("duration=\"12\"", "duration=\"12\" background=\"#00000000\"");
+        let (p, overlays, _) = run(&xml);
+        assert_eq!(overlays.len(), 1, "camera and box must share one projection context");
+        let doc = read::read(std::str::from_utf8(&overlays[0].document).unwrap(), &Default::default()).unwrap();
+        for id in ["view", "box"] {
+            assert_eq!(doc.doc.descendants().filter(|n| n.attribute("id") == Some(id)).count(), 1);
+        }
+        assert_eq!(seq(&p).video_tracks.iter().flat_map(|t| &t.items).count(), 1);
+        assert_overlay_round_trip(&p);
+    }
+}
+
+#[test]
+fn scene_import_round4_camera_switch_preserves_scope_and_dependencies() {
+    // cameraType picks the last active live camera: wide for [0,6), close for
+    // [6,12). A group's camera still affects its sibling box outside that group.
+    let xml = scene(r#"<group id="rig"><camera id="wide" z="-1000" fov="60"/><camera id="close" z="-1000" start="6" end="12" target="aim"><expression property="fov">param('lens')</expression><link property="x" source="aim.x"/></camera><shape id="aim" shape="rect" width="1" height="1" x="100"/></group><object3D id="box" primitive="box"/>"#)
+        .replace("<assets>", r#"<parameters><param id="lens" type="number" default="20"/></parameters><assets>"#)
+        .replace("duration=\"12\"", "duration=\"12\" background=\"#00000000\"");
+    let (p, overlays, _) = run(&xml);
+    assert_eq!(overlays.len(), 1, "switching cameras and their content must coalesce");
+    let doc = read::read(std::str::from_utf8(&overlays[0].document).unwrap(), &Default::default()).unwrap();
+    for id in ["rig", "wide", "close", "aim", "box", "lens"] {
+        assert_eq!(doc.doc.descendants().filter(|n| n.attribute("id") == Some(id)).count(), 1, "{id}");
+    }
+    let cameras: Vec<_> = doc.doc.descendants().filter(|n| n.has_tag_name("camera")).collect();
+    assert_eq!(cameras[0].attribute("id"), Some("wide"));
+    assert_eq!((cameras[1].attribute("start"), cameras[1].attribute("end")), (Some("6"), Some("12")));
+    assert!(doc.doc.descendants().any(|n| n.has_tag_name("expression") && n.text() == Some("param('lens')")));
+    assert!(doc.doc.descendants().any(|n| n.has_tag_name("link") && n.attribute("source") == Some("aim.x")));
+    assert_eq!(seq(&p).video_tracks.iter().flat_map(|t| &t.items).count(), 1);
+    assert_overlay_round_trip(&p);
+}
+
+#[test]
+fn scene_import_round4_audio_after_silent_three_d_sequence_child() {
+    // A silent 3D source still advances the sequence cursor by its 2s source
+    // span. The only soundtrack, b, must use that corrected cursor at 2s.
+    let xml = scene(r#"<sequence id="s"><layer id="a" asset="silent" threeD="true" clipOut="2"/><layer id="b" asset="v" clipOut="2"/></sequence>"#)
+        .replace("<assets>", r#"<assets><video id="silent" src="silent.mp4" width="640" height="480" fps="25" duration="10"/>"#);
+    let (p, _, _) = run(&xml);
+    let audio: Vec<_> = seq(&p).audio_tracks.iter().flat_map(|t| &t.items).collect();
+    assert_eq!(audio.len(), 1, "silent preceding video must still advance the audio clock");
+    assert_eq!((audio[0].name.as_str(), audio[0].start, audio[0].duration, audio[0].source_in), ("b", sec(2), sec(2), sec(0)));
 }
