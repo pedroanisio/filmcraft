@@ -592,6 +592,13 @@ pub fn with_links(s: &Session, clips: &[ClipId]) -> Vec<ClipId> {
     out
 }
 
+/// The clips Clear and Ripple Delete remove: named clips with their linked partners, or the
+/// selection as it stands. `timeline.select` already added the partners when linked selection
+/// was on, so a selection made without them (the Alt marquee, #1163) leaves them in place.
+fn clips_to_remove(s: &Session, p: &Value) -> Vec<ClipId> {
+    if p.get("clips").is_some() || p.get("clip").is_some() { with_links(s, &clips_p(s, p)) } else { s.state.selection.clone() }
+}
+
 /// The delta a trim of `clips` (a clip and its linked partners) can apply together: `delta`
 /// clamped by each one's media and neighbours.
 fn clamp_trim_linked(q: &filmcraft_project::Sequence, clips: &[ClipId], edge: Edge, mode: TrimMode, delta: Tick, ctx: &edit::EditCtx) -> Result<Tick> {
@@ -1718,7 +1725,7 @@ fn build() -> Vec<CommandSpec> {
                 let caps = s.state.caption_selection.clone();
                 return crate::captions::delete(s, &caps, false);
             }
-            let sel = with_links(s, &clips_p(s, p));
+            let sel = clips_to_remove(s, p);
             s.edit_sequence("Clear", |q, _, st| {
                 edit::delete_items(q, &sel);
                 st.selection.clear();
@@ -1736,7 +1743,7 @@ fn build() -> Vec<CommandSpec> {
                 let caps = s.state.caption_selection.clone();
                 return crate::captions::delete(s, &caps, true);
             }
-            let sel = with_links(s, &clips_p(s, p));
+            let sel = clips_to_remove(s, p);
             s.edit_sequence("Ripple Delete", |q, _, st| {
                 let spans = edit::ripple_delete_items(q, &sel)?;
                 if st.ripple_sequence_markers {

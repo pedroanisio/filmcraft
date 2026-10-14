@@ -151,6 +151,23 @@ fn select_linked_false_leaves_the_linked_partners_out() {
     assert_eq!(s.state.selection.len(), 2, "linked: true adds the audio");
 }
 
+/// #1163: Delete removes the selection as made; video selected without its linked audio (Alt
+/// marquee) leaves the audio, while a clip named in the params still takes its partners.
+#[test]
+fn clear_keeps_linked_audio_left_out_of_the_selection() {
+    let mut s = demo();
+    let first = s.active_sequence().unwrap().video_tracks[0].items[0].clone();
+    let audio = s.active_sequence().unwrap().audio_tracks[0].items.iter().find(|i| i.link == first.link).unwrap().id;
+    s.execute("timeline.select", json!({"clips": [first.id.0], "linked": false})).unwrap();
+    s.execute("edit.clear", json!({})).unwrap();
+    let q = s.active_sequence().unwrap();
+    assert!(q.find_item(first.id).is_none());
+    assert!(q.find_item(audio).is_some(), "the unselected linked audio stays");
+    s.execute("edit.undo", json!({})).unwrap();
+    s.execute("edit.clear", json!({"clips": [first.id.0]})).unwrap();
+    assert!(s.active_sequence().unwrap().find_item(audio).is_none(), "a named clip goes with its linked audio");
+}
+
 #[test]
 fn slide_moves_linked_audio_with_the_video() {
     let mut s = demo();
