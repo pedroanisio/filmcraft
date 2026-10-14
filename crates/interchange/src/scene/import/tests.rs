@@ -899,3 +899,64 @@ fn scene_import_round4_audio_after_silent_three_d_sequence_child() {
     assert_eq!(audio.len(), 1, "silent preceding video must still advance the audio clock");
     assert_eq!((audio[0].name.as_str(), audio[0].start, audio[0].duration, audio[0].source_in), ("b", sec(2), sec(2), sec(0)));
 }
+
+#[test]
+fn scene_import_round5_overlay_transition_report() {
+    // transitionType: the two sibling layers and their crossfade are preserved
+    // together by camera promotion, so no native transition or loss is needed.
+    for transition in [r#"<transition from="a" to="b" type="crossfade" duration="2"/>"#, r#"<transition to="b" type="crossfade" duration="2"/>"#] {
+        let xml = scene(&format!(r#"<camera id="view" z="-1000"/><layer id="a" asset="i" end="4"/><layer id="b" asset="i" start="4" end="8"/>{transition}"#));
+        let (p, overlays, report) = run(&xml);
+        assert_eq!(overlays.len(), 1);
+        let doc = read::read(std::str::from_utf8(&overlays[0].document).unwrap(), &Default::default()).unwrap();
+        assert_eq!(doc.doc.descendants().filter(|n| n.has_tag_name("transition")).count(), 1);
+        assert!(seq(&p).video_tracks.iter().all(|t| t.transitions.is_empty()));
+        assert!(!report.mentions("Unmapped transition"), "{report}");
+    }
+}
+
+#[test]
+fn scene_import_round5_overlay_sequence_transition_report() {
+    // sequenceType creates an implicit crossfade at a's end (4 seconds).
+    // Preserving the sequence and both children also preserves that transition.
+    let xml = scene(
+        r#"<camera id="view"/><sequence id="q" transition="crossfade" transitionDuration="2"><layer id="a" asset="i" end="4"/><layer id="b" asset="i" end="4"/></sequence>"#,
+    );
+    let (p, overlays, report) = run(&xml);
+    assert_eq!(overlays.len(), 1);
+    let doc = read::read(std::str::from_utf8(&overlays[0].document).unwrap(), &Default::default()).unwrap();
+    assert_eq!(doc.doc.descendants().find(|n| n.has_tag_name("sequence")).unwrap().attribute("transition"), Some("crossfade"));
+    assert!(seq(&p).video_tracks.iter().all(|t| t.transitions.is_empty()));
+    assert!(!report.mentions("Unmapped transition"), "{report}");
+}
+
+#[test]
+fn scene_import_round5_partial_overlay_transition_keeps_native_report() {
+    // Only a is preserved in an overlay. The sibling transition stays native:
+    // crossfade maps, but its default ease-in-out curve still requires a warning.
+    // With neither endpoint preserved, the same native behavior must remain.
+    for expression in ["<expression property=\"x\">1</expression>", ""] {
+        let xml = scene(&format!(
+            r#"<layer id="a" asset="i" end="4">{expression}</layer><layer id="b" asset="i" start="4" end="8"/><transition from="a" to="b" type="crossfade" duration="2"/>"#
+        ));
+        let (p, overlays, report) = run(&xml);
+        assert_eq!(overlays.len(), usize::from(!expression.is_empty()));
+        let transitions: Vec<_> = seq(&p).video_tracks.iter().flat_map(|t| &t.transitions).collect();
+        assert_eq!(transitions.len(), 1, "{report}");
+        assert_eq!((transitions[0].start, transitions[0].duration), (sec(3), sec(2)));
+        assert!(report.mentions("Unmapped transition curve ease-in-out"), "{report}");
+    }
+}
+
+#[test]
+fn scene_import_round5_separate_overlays_transition_keeps_native_report() {
+    // Coverage of both endpoints by different overlays does not preserve the
+    // transition itself. It still maps natively and reports the unsupported curve.
+    let xml = scene(
+        r#"<layer id="a" asset="i" end="4"><expression property="x">1</expression></layer><layer id="b" asset="i" start="4" end="8"><expression property="x">2</expression></layer><transition from="a" to="b" type="crossfade" duration="2"/>"#,
+    );
+    let (p, overlays, report) = run(&xml);
+    assert_eq!(overlays.len(), 2);
+    assert_eq!(seq(&p).video_tracks.iter().map(|t| t.transitions.len()).sum::<usize>(), 1);
+    assert!(report.mentions("Unmapped transition curve ease-in-out"), "{report}");
+}

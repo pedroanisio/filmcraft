@@ -1,6 +1,19 @@
 use super::*;
 use filmcraft_project::{Param, ParamValue, Transition, TransitionAlign, TransitionId};
 
+/// Whether one overlay retains both the transition definition and all its endpoints.
+pub(super) fn preserved_in_overlay(r: &Resolved, tr: &resolve::Transition, covered: &HashSet<usize>) -> bool {
+    let Some(endpoint) = tr.from.or(tr.to) else { return false };
+    if !tr.from.into_iter().chain(tr.to).all(|i| covered.contains(&i)) {
+        return false;
+    }
+    match tr.node {
+        Some(i) => covered.contains(&i),
+        // Auto-transitions are defined by the enclosing sequence's attributes.
+        None => r.node(endpoint).and_then(|n| n.parent).and_then(|i| r.node(i)).is_some_and(|n| n.class == NodeClass::Sequence && covered.contains(&n.index)),
+    }
+}
+
 pub(super) fn apply(
     doc: &SceneDoc<'_>,
     r: &Resolved,
@@ -9,6 +22,7 @@ pub(super) fn apply(
     log: &mut Log,
     snaps: &mut Snaps,
     clock: Option<(Tick, f64)>,
+    preserved_transitions: &HashSet<usize>,
 ) -> Result<()> {
     let root = clock.is_none();
     let (origin, rate) = clock.unwrap_or((Tick::ZERO, 1.));
@@ -30,7 +44,10 @@ pub(super) fn apply(
             endpoints.insert(name.to_owned(), ((*first_track, first.id), (*last_track, last.id)));
         }
     }
-    for tr in &r.transitions {
+    for (i, tr) in r.transitions.iter().enumerate() {
+        if preserved_transitions.contains(&i) {
+            continue;
+        }
         let locate = |index: Option<usize>, from: bool| {
             let name = index.and_then(|i| r.node(i)).map(|n| n.id.as_str())?;
             endpoints.get(name).map(|(first, last)| if from { *last } else { *first })

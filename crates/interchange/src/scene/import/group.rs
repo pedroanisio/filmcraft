@@ -12,6 +12,7 @@ pub(super) fn fold(
     audio: &mut Vec<TrackItem>,
     log: &mut Log,
     snaps: &mut Snaps,
+    preserved_transitions: &HashSet<usize>,
 ) -> Result<()> {
     // A group that already has a clip was preserved as an overlay, including its descendants.
     let represented: HashSet<_> = video.iter().map(|c| c.name.as_str()).collect();
@@ -101,7 +102,7 @@ pub(super) fn fold(
             log.warn("Nested group dropped: zero frames")?;
             continue;
         }
-        transition::apply(doc, r, b, &mut seq, log, snaps, Some((origin, rate)))?;
+        transition::apply(doc, r, b, &mut seq, log, snaps, Some((origin, rate)), preserved_transitions)?;
         let source_duration = scaled_ticks(sub(source_end, origin)?, rate)?;
         seq.mark_out = Some(source_duration);
         retain_duration(b, &mut seq, source_duration)?;

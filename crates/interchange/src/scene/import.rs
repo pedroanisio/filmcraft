@@ -204,6 +204,7 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
     }
     let mut keys = 0usize;
     let mut sampled_keys = 0usize;
+    let mut preserved_transitions = HashSet::new();
     for n in &resolved.nodes {
         if let Some(plan) = plans.remove(&n.index) {
             let root = plan.root.and_then(|i| resolved.node(i));
@@ -214,6 +215,9 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
                 log.warn("Video clip dropped: zero frames")?;
             } else {
                 let name = root.map_or("Scene Composition", |n| n.id.as_str());
+                preserved_transitions.extend(
+                    resolved.transitions.iter().enumerate().filter(|(_, tr)| transition::preserved_in_overlay(&resolved, tr, &plan.covered)).map(|(i, _)| i),
+                );
                 let overlay::Plan { path, document, has_audio, .. } = plan;
                 let item = b.file_media(
                     &format!("@overlay-{}", n.index),
@@ -338,11 +342,11 @@ pub fn import(bytes: &[u8], opts: &ImportOptions) -> Result<(Imported, Vec<Overl
     }
     report_unmapped(&doc, &resolved, &mut log)?;
     if !whole_composition {
-        group::fold(&doc, &resolved, &mut b, &mut video, &mut audio, &mut log, &mut snaps)?;
+        group::fold(&doc, &resolved, &mut b, &mut video, &mut audio, &mut log, &mut snaps, &preserved_transitions)?;
     }
     transition::place(&resolved, &mut b, &mut seq, video, &mut log)?;
     place(&mut b, &mut seq, TrackKind::Audio, audio)?;
-    transition::apply(&doc, &resolved, &mut b, &mut seq, &mut log, &mut snaps, None)?;
+    transition::apply(&doc, &resolved, &mut b, &mut seq, &mut log, &mut snaps, None, &preserved_transitions)?;
     meta::apply(&doc, &resolved, &assets, &mut b, &mut seq, &mut log)?;
     if seq.duration() < duration {
         // Sequence has no independent duration field. A disabled carrier preserves the empty tail.
