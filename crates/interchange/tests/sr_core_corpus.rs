@@ -619,6 +619,9 @@ fn scene_corpus_external_matte() {
     regression("external-matte", include_str!("fixtures/scene/corpus/external-matte.scene"));
 }
 
+// A synthetic entry for the matcher's own tests, so they don't depend on which product bugs are still open.
+const SAMPLE_REGRESSION: KnownRegression = KnownRegression { file: "sample", stage: "import", codes: &["MOV2"], message: None };
+
 fn known_failure(failure: &Failure, name: &str, known: &KnownRegression) -> bool {
     !failure.panic
         && failure.case == name
@@ -629,7 +632,7 @@ fn known_failure(failure: &Failure, name: &str, known: &KnownRegression) -> bool
 
 #[test]
 fn scene_corpus_known_failures_never_hide_panics() {
-    let known = &KNOWN_REGRESSIONS[1];
+    let known = &SAMPLE_REGRESSION;
     let mut failure = Failure::new("import", "MOV2");
     failure.case = "sample".into();
     failure.codes = vec!["MOV2".into()];
@@ -692,7 +695,7 @@ fn harness_roundtrips_both_import_modes() {
 
 #[test]
 fn harness_known_failure_rejects_extra_codes_and_other_stages() {
-    let known = &KNOWN_REGRESSIONS[1];
+    let known = &SAMPLE_REGRESSION;
     for (stage, codes) in [("import", vec!["MOV2".into(), "NEW".into()]), ("re-import", vec!["MOV2".into()]), ("export", vec!["MOV2".into()])] {
         let mut failure = Failure::new(stage, "diagnostic");
         failure.case = "sample".into();
