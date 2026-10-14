@@ -97,7 +97,7 @@ impl BridgeClient {
             }
             .await;
             match res {
-                Ok(v) => {
+                Ok(mut v) => {
                     let mut idle = self.idle.lock().await;
                     if idle.len() < MAX_IDLE {
                         idle.push(conn);
@@ -106,7 +106,11 @@ impl BridgeClient {
                     return if v.get("ok").and_then(Value::as_bool) == Some(true) {
                         Ok(v.get("result").cloned().unwrap_or(Value::Null))
                     } else {
-                        Err(AutomationError::App(v.get("error").and_then(Value::as_str).unwrap_or("error").to_string()))
+                        let message = v.get("error").and_then(Value::as_str).unwrap_or("error").to_string();
+                        match v.as_object_mut().and_then(|object| object.remove("diagnostics")).filter(Value::is_array) {
+                            Some(diagnostics) => Err(AutomationError::AppDiagnostics { message, diagnostics }),
+                            None => Err(AutomationError::App(message)),
+                        }
                     };
                 }
                 Err(_) if attempt == 0 => {}
@@ -131,6 +135,24 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn scene_fix_bridge_preserves_diagnostics() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = BridgeClient::new(listener.local_addr().unwrap().to_string()).unwrap();
+        let diagnostics = serde_json::json!([{"severity":"error","rule":"R12","path":"/scene/project","line":2,"message":"invalid width"}]);
+        let reply = json!({"ok":false,"error":"invalid scene","diagnostics":diagnostics});
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut line = String::new();
+            BufReader::new(&mut socket).read_line(&mut line).await.unwrap();
+            socket.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
+        });
+        let error = client.execute("file.importScene", json!({"path":"bad.scene"})).await.unwrap_err();
+        server.await.unwrap();
+        assert_eq!(error.to_json(), json!({"error":"app: invalid scene","diagnostics":diagnostics}));
+        assert_eq!(AutomationError::App("unchanged".into()).to_json(), json!({"error":"app: unchanged"}));
+    }
 
     /// A stand-in for the app's control server: the export starts job 7, which `jobs.list` reports
     /// running twice and then finished with `result`. Every request is recorded.

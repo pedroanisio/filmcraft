@@ -190,7 +190,10 @@ fn png_result(png: &[u8], note: &str) -> CallToolResult {
 fn wrap(r: Result<Value, AutomationError>) -> Result<CallToolResult, McpError> {
     Ok(match r {
         Ok(v) => ok_json(&v),
-        Err(e) => fail(e),
+        Err(e) => {
+            let value = e.to_json();
+            if value.get("diagnostics").is_some() { fail(value) } else { fail(e) }
+        }
     })
 }
 
@@ -353,7 +356,11 @@ impl FilmcraftMcp {
                 }
                 Err(e) => {
                     failed += 1;
-                    results.push(json!({"ok": false, "error": e.to_string()}));
+                    let mut value = e.to_json();
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert("ok".into(), json!(false));
+                    }
+                    results.push(value);
                     if stop {
                         break;
                     }
@@ -682,6 +689,24 @@ fn render_scale(max_side: u32, w: u32, h: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn scene_fix_mcp_single_and_batch_diagnostics() {
+        let m = FilmcraftMcp::headless(crate::invalid_scene_session());
+        let params = json!({"path":"/virtual/bad.scene"});
+        let r = m.command_run(Parameters(RunParams { id: "file.importScene".into(), params: Some(params.clone()) })).await.unwrap();
+        let v = serde_json::to_value(r).unwrap();
+        let error: Value = serde_json::from_str(v["content"][0]["text"].as_str().unwrap()).expect("diagnostic JSON content");
+        assert!(error["diagnostics"].as_array().is_some_and(|d| !d.is_empty()));
+        let p = serde_json::from_value(json!({"steps":[{"id":"file.importScene","params":params}]})).unwrap();
+        let r = m.command_batch(Parameters(p)).await.unwrap();
+        let v = serde_json::to_value(r).unwrap();
+        let body: Value = serde_json::from_str(v["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["results"][0]["diagnostics"], error["diagnostics"]);
+        assert_eq!(body["results"][0]["error"], error["error"]);
+        let unchanged = wrap(Err(AutomationError::BadRequest("unchanged".into()))).unwrap();
+        assert_eq!(serde_json::to_value(unchanged).unwrap()["content"][0]["text"], "unchanged");
+    }
 
     #[test]
     fn render_scale_zero_means_no_limit() {

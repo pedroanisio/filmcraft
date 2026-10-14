@@ -119,7 +119,52 @@ FilmCraft spawns the separately installed `scene-render` program and never ships
 | `scene.renderer.status` | `{}` | `{found, path, version, schema, reason}`; unavailable values are `null`, and `reason` explains an unavailable renderer |
 | `scene.renderer.clearCache` | `{}` | `{bytes}` removed from `<media cache>/Scene Renders`; also drops cached scene sources and frames; errors if this session has no media cache folder |
 
-Both commands reject extra fields and non-object parameters. `prefs.set` accepts
+`file.importScene {path, mode?: "rendered" | "native" | "hybrid", lenient?: bool}` imports a scene
+explicitly. It appears at File ▸ Import ▸ Scene… and is available through the command registry to
+CLI, control and MCP clients. `mode` defaults to `hybrid`; `lenient` defaults to `false`.
+
+- `rendered` requires a `.scene` path and delegates to `file.import`: one file-backed media item,
+  with the same renderer warnings.
+- `native` imports editable sequences. If any subtree needs an external-render overlay, it refuses
+  with the overlay count. With `lenient: true`, it drops those overlays and names the loss in `report`.
+- `hybrid` imports editable sequences and writes the unsupported subtrees as `.scene` files under
+  the document's adjacent `<name> Scene Overlays` directory. The normal media-link step opens them
+  through scene-render. An unavailable renderer gives the scene placeholder and a warning.
+
+Native and hybrid results contain `{format, sequences, linkedMedia, offlineMedia, report, warnings,
+overlays: [{item, path}]}`; `item` is the ID in the merged project. Import and media linking form
+one undo step. Undo removes imported project items; it does not delete written overlay files.
+Hosts with virtual file storage receive overlay bytes through `Services::write_file` without creating
+local directories. Those hosts link a placeholder with a `warnings` entry explaining that the renderer
+requires filesystem-backed paths; they never pass the virtual overlay path to the external program,
+including after cache clearing or during export. `Services::is_filesystem_backed(path)` identifies
+paths that external programs can read, independently of `export_in_memory()`. It defaults to false;
+`FsServices` enables it on native hosts. Filesystem-backed overlays use the renderer even when exports
+are encoded in memory.
+Only the final extension is removed from the scene filename: `shot.v1.scene` and `shot.v2.scene`
+produce distinct sequence names and overlay directories. Overlay write errors fail before the project is changed. An existing overlay file
+is reused only if its bytes match; differing content is an error. Files written before a later
+write fails remain on disk.
+
+The command rejects unknown fields, non-object parameters, invalid modes, non-boolean `lenient`,
+and paths that are empty, exceed 16 KiB, contain NUL, or contain a `..` component. Limits on scene
+bytes, nesting and numbers also apply to lenient imports.
+
+Invalid scene errors retain the existing `error` message string and add
+`diagnostics: [{severity, rule, path, line, message}]`. `rule` is the scene diagnostic code,
+`path` is the element path, and `line` is 1-based (0 if unknown). Other error shapes are unchanged.
+MCP command errors carry this object as JSON text content with `isError: true`; MCP batches and
+CLI `run` JSON lines include `diagnostics` next to their existing `error` field.
+
+`file.import` continues to treat `.scene` paths as rendered media. For interchange documents
+(including a `<scene>` document with an `.xml` suffix), its optional `lenient: bool` reaches the
+interchange importer. A native scene imported this way refuses overlays unless lenient.
+
+`file.exportInterchange {format: "scene", path, sequence?}` exports the selected or active sequence
+as a validated scene document. `file.exportScene {path, sequence?}` is the File ▸ Export ▸
+sr-core scene (.scene) menu command and opens a `.scene` save dialog when no path is supplied.
+
+Both renderer commands reject extra fields and non-object parameters. `prefs.set` accepts
 `plugins.sceneRenderPath` (empty searches `FILMCRAFT_SCENE_RENDER`, then `PATH`) and
 `plugins.sceneRenderPreviewQuality` (`draft` or `preview`, default `preview`). Renderer, quality or
 media-cache location changes reopen cached scenes and their proxies. File exports use `final`

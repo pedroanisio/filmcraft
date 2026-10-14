@@ -92,8 +92,32 @@ pub enum EngineError {
     Edit(#[from] filmcraft_edit::EditError),
     #[error("media: {0}")]
     Media(#[from] filmcraft_media::MediaError),
+    /// An invalid scene, retaining schema diagnostics alongside the contextual message.
+    #[error("{message}")]
+    InvalidScene { message: String, diagnostics: Vec<filmcraft_interchange::scene::Diagnostic> },
     #[error("{0}")]
     Other(String),
+}
+
+impl EngineError {
+    /// Error payload with a message and structured scene diagnostics when available.
+    pub fn to_json(&self) -> Value {
+        let mut value = serde_json::json!({"error": self.to_string()});
+        if let Self::InvalidScene { diagnostics, .. } = self
+            && let Some(object) = value.as_object_mut()
+        {
+            let diagnostics: Vec<Value> = diagnostics
+                .iter()
+                .map(|d| {
+                    serde_json::json!({
+                        "severity": d.severity, "rule": d.code, "path": d.path, "line": d.line, "message": d.message,
+                    })
+                })
+                .collect();
+            object.insert("diagnostics".into(), Value::Array(diagnostics));
+        }
+        value
+    }
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -128,6 +152,12 @@ pub trait Services: Send + Sync {
     fn file_loader(&self) -> Option<filmcraft_media::sequence::FrameLoader> {
         None
     }
+    /// Whether this path and its relative assets use the native filesystem namespace, so
+    /// external programs can read them directly. Includes paths that have yet to be written.
+    /// Defaults to false; independent of the export encoding mode.
+    fn is_filesystem_backed(&self, _path: &str) -> bool {
+        false
+    }
     /// Exports are encoded in memory and handed to [`Services::write_file`] (hosts without a
     /// filesystem, e.g. the web: the file is then offered as a download). Otherwise they stream
     /// to the output path.
@@ -152,6 +182,10 @@ pub trait Services: Send + Sync {
 /// Native filesystem services.
 pub struct FsServices;
 impl Services for FsServices {
+    fn is_filesystem_backed(&self, _path: &str) -> bool {
+        cfg!(not(target_arch = "wasm32"))
+    }
+
     fn read_file(&self, path: &str) -> std::io::Result<Vec<u8>> {
         std::fs::read(path)
     }

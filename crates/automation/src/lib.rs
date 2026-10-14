@@ -27,6 +27,9 @@ pub enum AutomationError {
     Bridge(String),
     #[error("app: {0}")]
     App(String),
+    /// A desktop scene-validation error with its structured diagnostic payload.
+    #[error("app: {message}")]
+    AppDiagnostics { message: String, diagnostics: serde_json::Value },
     #[error("{0}")]
     Other(String),
 }
@@ -41,4 +44,29 @@ pub fn png_rgba(w: u32, h: u32, rgba: Vec<u8>, max_side: u32) -> Result<Vec<u8>,
     let mut out = std::io::Cursor::new(Vec::new());
     img.write_to(&mut out, image::ImageFormat::Png).map_err(|e| AutomationError::Other(e.to_string()))?;
     Ok(out.into_inner())
+}
+
+impl AutomationError {
+    /// Error JSON, preserving structured diagnostics supplied by the engine or desktop app.
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            Self::Engine(error) => error.to_json(),
+            Self::AppDiagnostics { diagnostics, .. } => serde_json::json!({"error": self.to_string(), "diagnostics": diagnostics}),
+            _ => serde_json::json!({"error": self.to_string()}),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn invalid_scene_session() -> filmcraft_engine::Session {
+    struct InvalidScene;
+    impl filmcraft_engine::Services for InvalidScene {
+        fn read_file(&self, _: &str) -> std::io::Result<Vec<u8>> {
+            Ok(br#"<scene version="1.7"><project width="0" height="24" fps="24" duration="4"/><composition/></scene>"#.to_vec())
+        }
+        fn write_file(&self, _: &str, _: &[u8]) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    filmcraft_engine::Session::new(std::sync::Arc::new(InvalidScene))
 }

@@ -103,9 +103,14 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
         "engine.execute" | "ui.menu.invoke" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             let params = p.get("params").cloned().unwrap_or(json!({}));
-            match crate::menus::invoke(app, ctx, id, params) {
+            match crate::menus::invoke_json(app, ctx, id, params) {
                 Ok(v) => ok(v),
-                Err(e) => err(e),
+                Err(mut error) => {
+                    if let Some(object) = error.as_object_mut() {
+                        object.insert("ok".into(), json!(false));
+                    }
+                    Outcome::Done(error)
+                }
             }
         }
         "engine.commands" => match app.session.execute("command.list", json!({})) {

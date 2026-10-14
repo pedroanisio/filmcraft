@@ -300,7 +300,10 @@ impl MediaPool {
     /// has one: containers then read only their index now and samples on demand).
     pub fn open_file(&self, path: &str, services: &dyn Services) -> Result<SharedSource, MediaError> {
         if crate::scene_render::is_scene(path) {
-            return self.open_scene_bytes(path, &crate::scene_render::read(path, services)?).map(|opened| opened.source);
+            let bytes = crate::scene_render::read(path, services)?;
+            let opened =
+                if !services.is_filesystem_backed(path) { crate::scene_render::virtual_placeholder(path, &bytes) } else { self.open_scene_bytes(path, &bytes) };
+            return opened.map(|opened| opened.source);
         }
         let io = |e: std::io::Error| if e.kind() == std::io::ErrorKind::NotFound { MediaError::Offline(e.to_string()) } else { MediaError::Io(e.to_string()) };
         if let Some(r) = services.reader(path) {
@@ -371,7 +374,13 @@ impl MediaPool {
                     env.quality = filmcraft_scenerender::Quality::Final;
                 }
                 crate::scene_render::read(path, services)
-                    .and_then(|bytes| crate::scene_render::open(path, &bytes, &env))
+                    .and_then(|bytes| {
+                        if !services.is_filesystem_backed(path) {
+                            crate::scene_render::virtual_placeholder(path, &bytes)
+                        } else {
+                            crate::scene_render::open(path, &bytes, &env)
+                        }
+                    })
                     .map(|opened| (opened.source, opened.warning))
             } else if m.info.kind == filmcraft_media::MediaKind::ImageSequence {
                 open_image_sequence(path, services, m.info.frame_rate(), &it.name).map(|source| (source, None))

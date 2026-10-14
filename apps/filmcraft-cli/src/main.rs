@@ -169,11 +169,11 @@ impl Backend {
         Backend::Local(Box::new(s))
     }
 
-    async fn exec(&mut self, id: &str, params: Value) -> Result<Value, String> {
+    async fn exec(&mut self, id: &str, params: Value) -> Result<Value, filmcraft_automation::AutomationError> {
         match self {
-            Backend::Local(s) => s.execute(id, params).map_err(|e| e.to_string()),
+            Backend::Local(s) => s.execute(id, params).map_err(Into::into),
             // a blocking export runs as an app job polled by the client (#91, #92)
-            Backend::Bridge(b) => b.execute(id, params).await.map_err(|e| e.to_string()),
+            Backend::Bridge(b) => b.execute(id, params).await,
         }
     }
 
@@ -359,7 +359,7 @@ async fn cli() {
                 match b.exec(id, v.get("params").cloned().unwrap_or(json!({}))).await {
                     Ok(r) => outln!("{}", json!({"line": n + 1, "id": id, "ok": true, "result": r})),
                     Err(e) => {
-                        outln!("{}", json!({"line": n + 1, "id": id, "ok": false, "error": e}));
+                        outln!("{}", run_error_json(n + 1, id, &e));
                         failed += 1;
                         if !a.flag("--keep-going") {
                             std::process::exit(1);
@@ -445,7 +445,11 @@ async fn cli() {
                 q["start"] = json!(true);
                 b.exec("export.queue.add", q).await.and_then(|v| {
                     let failed: Vec<&Value> = v["items"].as_array().map(|i| i.iter().filter(|x| x["status"] != "done").collect()).unwrap_or_default();
-                    if failed.is_empty() { Ok(v) } else { Err(format!("queue: {}", Value::Array(failed.into_iter().cloned().collect()))) }
+                    if failed.is_empty() {
+                        Ok(v)
+                    } else {
+                        Err(filmcraft_automation::AutomationError::Other(format!("queue: {}", Value::Array(failed.into_iter().cloned().collect()))))
+                    }
                 })
             } else {
                 b.exec("file.exportMedia", p).await
@@ -681,5 +685,45 @@ mod format_tests {
         assert_eq!(super::format_for("out/clip.MXF"), Some("mxf-op1a"));
         assert_eq!(super::format_for("a.mov"), Some("prores"));
         assert_eq!(super::format_for("noext"), None);
+    }
+}
+
+fn run_error_json(line: usize, id: &str, error: &filmcraft_automation::AutomationError) -> Value {
+    let mut value = error.to_json();
+    if let Some(object) = value.as_object_mut() {
+        object.insert("line".into(), json!(line));
+        object.insert("id".into(), json!(id));
+        object.insert("ok".into(), json!(false));
+    }
+    value
+}
+
+#[cfg(test)]
+mod scene_fix_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn scene_fix_cli_run_error_keeps_diagnostics() {
+        struct InvalidScene;
+        impl filmcraft_engine::Services for InvalidScene {
+            fn read_file(&self, _: &str) -> std::io::Result<Vec<u8>> {
+                Ok(br#"<scene version="1.7"><project width="0" height="24" fps="24" duration="4"/><composition/></scene>"#.to_vec())
+            }
+            fn write_file(&self, _: &str, _: &[u8]) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut backend = Backend::Local(Box::new(Session::new(std::sync::Arc::new(InvalidScene))));
+        let error = backend.exec("file.importScene", json!({"path":"/virtual/bad.scene"})).await.unwrap_err();
+        let value = run_error_json(7, "file.importScene", &error);
+        assert!(value["diagnostics"].as_array().is_some_and(|d| !d.is_empty()), "{value}");
+        assert_eq!(value["line"], 7);
+        assert_eq!(value["id"], "file.importScene");
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["error"], error.to_string());
+        assert_eq!(
+            run_error_json(1, "unknown", &filmcraft_automation::AutomationError::Other("unchanged".into())),
+            json!({"line":1,"id":"unknown","ok":false,"error":"unchanged"})
+        );
     }
 }

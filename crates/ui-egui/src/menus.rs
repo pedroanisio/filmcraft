@@ -177,7 +177,17 @@ pub fn targets_source(app: &FilmcraftApp, params: &Value) -> bool {
 }
 
 /// Execute a UI or engine command by id.
-pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params: Value) -> Result<Value, String> {
+pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
+    invoke_inner(app, ctx, id, params, &mut None)
+}
+
+/// Control-channel dispatch with structured engine errors retained.
+pub(crate) fn invoke_json(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, Value> {
+    let mut error = None;
+    invoke_inner(app, ctx, id, params, &mut error).map_err(|message| error.unwrap_or_else(|| json!({"error": message})))
+}
+
+fn invoke_inner(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params: Value, error: &mut Option<Value>) -> Result<Value, String> {
     if id == "edit.selectAll" && (crate::panels::graphics::select_all_edited_text(app) || crate::panels::effect_controls::select_all_keyframes(app)) {
         return Ok(Value::Null);
     }
@@ -573,7 +583,7 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
     }
     // File dialogs for commands that need a path.
     if (id == "file.import" && params.get("paths").is_none() && params.get("path").is_none())
-        || (id == "file.importImageSequence" && params.get("path").is_none())
+        || (matches!(id, "file.importImageSequence" | "file.importScene") && params.get("path").is_none())
         || (id == "file.saveAs" && params.get("path").is_none())
         || (id == "file.saveCopy" && params.get("path").is_none())
         || (id == "file.open" && params.get("path").is_none())
@@ -584,7 +594,10 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
     {
         return app.file_dialog(id, &params);
     }
-    let r = app.session.execute(id, params).map_err(|e| e.to_string());
+    let r = app.session.execute(id, params).map_err(|e| {
+        *error = Some(e.to_json());
+        e.to_string()
+    });
     if let Err(e) = &r {
         app.ui.status = e.clone();
     }
@@ -1102,5 +1115,49 @@ mod tests {
         harness.run_steps(4);
         assert!(harness.query_by_label_contains("Save All").is_none(), "File menu should close");
         assert!(harness.query_by_label_contains("Undo").is_some(), "Edit menu should open on hover");
+    }
+}
+
+#[cfg(test)]
+mod scene_fix_tests {
+    #[test]
+    fn scene_fix_control_keeps_diagnostics() {
+        struct InvalidScene;
+        impl filmcraft_engine::Services for InvalidScene {
+            fn read_file(&self, _: &str) -> std::io::Result<Vec<u8>> {
+                Ok(br#"<scene version="1.7"><project width="0" height="24" fps="24" duration="4"/><composition/></scene>"#.to_vec())
+            }
+            fn write_file(&self, _: &str, _: &[u8]) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let session = filmcraft_engine::Session::new(std::sync::Arc::new(InvalidScene));
+        let mut app = crate::FilmcraftApp::new(session);
+        for method in ["engine.execute", "ui.menu.invoke"] {
+            let (request, _) =
+                crate::control::ControlRequest::new(method, serde_json::json!({"command":"file.importScene","params":{"path":"/virtual/bad.scene"}}));
+            let crate::control::Outcome::Done(reply) = crate::control::handle(&mut app, &egui::Context::default(), &request) else {
+                panic!("expected a reply")
+            };
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().is_some_and(|message| message.contains("invalid scene")), "{reply}");
+            assert!(reply["diagnostics"].as_array().is_some_and(|d| !d.is_empty()), "{reply}");
+        }
+        let (request, _) = crate::control::ControlRequest::new("engine.execute", serde_json::json!({"command":"no.such.command"}));
+        let crate::control::Outcome::Done(reply) = crate::control::handle(&mut app, &egui::Context::default(), &request) else { panic!("expected a reply") };
+        assert_eq!(reply, serde_json::json!({"ok":false,"error":"unknown command `no.such.command`"}));
+    }
+
+    #[test]
+    fn scene_fix_import_menu_opens_dialog() {
+        let mut app = crate::FilmcraftApp::new(filmcraft_engine::Session::default());
+        app.hooks.run_dialog = Some(Box::new(|dialog| {
+            assert!(matches!(dialog, crate::native_dialogs::FileDialog::OpenFiles { exts } if exts == ["scene", "xml"]));
+            std::sync::mpsc::channel().1
+        }));
+        let r = super::invoke(&mut app, &egui::Context::default(), "file.importScene", serde_json::json!({}));
+        assert!(r.is_ok(), "scene menu must open its picker: {r:?}");
+        assert_eq!(r.unwrap(), serde_json::json!({"dialog":"open"}));
+        assert!(app.native_dialog_open());
     }
 }

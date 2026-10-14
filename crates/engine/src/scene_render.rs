@@ -53,6 +53,23 @@ pub(crate) fn open(path: &str, bytes: &[u8], env: &Env) -> Result<Opened> {
     }
 }
 
+pub(crate) fn virtual_placeholder(path: &str, bytes: &[u8]) -> Result<Opened> {
+    if path.len() > 16 << 10 {
+        return Err(MediaError::Unsupported("scene document path exceeds 16 KiB".into()));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let rooted = std::path::absolute(path).map_err(io)?;
+    #[cfg(target_arch = "wasm32")]
+    let rooted = if Path::new(path).is_absolute() { Path::new(path).to_path_buf() } else { Path::new("/").join(path) };
+    // No executable is supplied, so discovery and process creation are bypassed entirely.
+    let mut opened =
+        filmcraft_scenerender::open_with(&rooted, bytes, &Env::default(), None, std::sync::Arc::new(filmcraft_scenerender::process::ProcessRunner))?;
+    let reason = "scene-render requires filesystem-backed paths; this host stores the scene in virtual file services".to_string();
+    opened.status.reason = Some(reason.clone());
+    opened.warning = Some(reason);
+    Ok(opened)
+}
+
 impl Session {
     pub(crate) fn apply_scene_prefs(&mut self) {
         let path = self.prefs.plugins.scene_render_path.trim();
