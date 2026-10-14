@@ -362,6 +362,24 @@ fn is_node(n: Node<'_, '_>) -> bool {
         )
 }
 
+fn stacking_z(element: &str, value: &str) -> Result<i64> {
+    let declaration = validate::complex_type(&format!("{element}Type")).and_then(|ty| ty.attr("z"));
+    if declaration.is_some_and(|attr| validate::root_builtin(attr.ty) == Some(validate::Builtin::Double)) {
+        let z = values::double(value).map_err(err)?;
+        // sr-eval exempts only these four; blackHole also uses its geometric z for stacking.
+        if matches!(element, "object3D" | "particles3D" | "ocean" | "camera") {
+            Ok(0)
+        } else {
+            let z = z.trunc().clamp(f64::from(i32::MIN), f64::from(i32::MAX));
+            // Convert only a finite, bounded, nonnegative magnitude; retain authored text.
+            let magnitude = z.abs() as i64;
+            Ok(if z < 0.0 { -magnitude } else { magnitude })
+        }
+    } else {
+        values::integer_in(value, i64::from(i32::MIN), i64::from(i32::MAX)).map_err(err)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Context {
     parent: Option<usize>,
@@ -1272,7 +1290,7 @@ impl<'a, 'i> Resolver<'a, 'i> {
             let mut ordered = Vec::with_capacity(kids.len());
             for &i in kids.iter() {
                 let n = self.out.nodes.get(i).ok_or_else(|| err("paint index"))?;
-                let z = values::integer_in(n.attributes.get("z").map(String::as_str).unwrap_or("0"), i64::from(i32::MIN), i64::from(i32::MAX)).map_err(err)?;
+                let z = stacking_z(&n.element, n.attributes.get("z").map(String::as_str).unwrap_or("0"))?;
                 ordered.push((z, i));
             }
             ordered.sort_by_key(|&(z, _)| z);
@@ -1299,5 +1317,139 @@ impl<'a, 'i> Resolver<'a, 'i> {
             *target = pos;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::*;
+    use crate::{ExportOptions, Format, ImportOptions, scene};
+
+    #[test]
+    fn scene_geometric_depth_is_not_a_stacking_index() {
+        // Each of these XSD types declares z as xs:double in scene units.
+        // sr-eval/src/program.rs exempts only these four elements from sibling stacking.
+        for element in ["camera", "object3D", "particles3D", "ocean"] {
+            for value in ["554.256", "-0.5", "1e-3", "2147483648", "-7"] {
+                assert_eq!(stacking_z(element, value).unwrap(), 0, "{element} z={value}");
+            }
+        }
+    }
+
+    #[test]
+    fn scene_black_hole_depth_truncates_and_saturates_stacking() {
+        // blackHoleType/z is xs:double; sr-eval converts it to i32 for sibling order.
+        // Fractions truncate toward zero and out-of-range finite values saturate.
+        for (value, expected) in [
+            ("-7", -7),
+            ("-7.9", -7),
+            ("7.9", 7),
+            ("-0.9", 0),
+            ("0.9", 0),
+            ("-0", 0),
+            ("1e2", 100),
+            ("2147483647.9", 2147483647),
+            ("-2147483648.9", -2147483648),
+            ("1e300", 2147483647),
+            ("-1e300", -2147483648),
+        ] {
+            assert_eq!(stacking_z("blackHole", value).unwrap(), expected, "z={value}");
+        }
+    }
+
+    #[test]
+    fn scene_black_hole_depth_keeps_mixed_sibling_order_and_text() {
+        for (value, shape_z, expected) in [
+            ("-7", "-1", ["bh", "s"]),
+            ("-7.900", "-1", ["bh", "s"]),
+            ("7.9", "1", ["s", "bh"]),
+            ("-0.9", "0", ["bh", "s"]),
+            ("1e300", "2147483647", ["bh", "s"]),
+            ("-1e300", "-2147483648", ["bh", "s"]),
+        ] {
+            // Compare truncated/saturated black-hole z with integer shape z; ties retain
+            // document order. The authored geometric depth must retain its exact spelling.
+            let text = document(&format!(r#"<blackHole id="bh" mass="1" z="{value}"/><shape id="s" shape="rect" width="8" height="8" z="{shape_z}"/>"#));
+            let doc = scene::read::read(&text, &Default::default()).unwrap();
+            let errors: Vec<_> = validate::validate(&doc.doc).into_iter().filter(|d| d.is_error()).collect();
+            assert!(errors.is_empty(), "fixture must validate: {errors:?}");
+            let resolved = resolve(&doc, &Default::default()).unwrap();
+            assert_eq!(resolved.nodes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), expected, "z={value}");
+            let black_hole = resolved.nodes.iter().find(|n| n.id == "bh").unwrap();
+            assert_eq!(black_hole.attributes["z"], value);
+        }
+    }
+
+    #[test]
+    fn scene_depth_types_reject_hostile_values() {
+        for element in ["camera", "object3D", "particles3D", "ocean", "blackHole"] {
+            // xs:double has no length suffix; scene values must also be finite.
+            for value in ["NaN", "INF", "-INF", "1e999", "0.5px", "50%", "1vw", ""] {
+                assert!(stacking_z(element, value).is_err(), "{element} accepted {value:?}");
+            }
+        }
+        for element in ["layer", "shape", "group", "sequence", "viewport3D", "particleEmitter"] {
+            // nodeCoreAttributes/z is xs:int, including on threeD=true 2D nodes.
+            assert_eq!(stacking_z(element, "-7").unwrap(), -7);
+            assert_eq!(stacking_z(element, "2147483647").unwrap(), 2147483647);
+            assert_eq!(stacking_z(element, "-2147483648").unwrap(), -2147483648);
+            for value in ["-0.5", "1.0", "1e2", "2147483648", "-2147483649"] {
+                assert!(stacking_z(element, value).is_err(), "{element} accepted {value:?}");
+            }
+        }
+    }
+
+    fn document(nodes: &str) -> String {
+        format!(r#"<scene version="1.7"><project width="64" height="64" fps="24" duration="1"/><composition>{nodes}</composition></scene>"#)
+    }
+
+    #[test]
+    fn scene_fractional_depth_keeps_sibling_paint_order() {
+        let text = document(
+            r#"<shape id="top" shape="rect" width="8" height="8" threeD="true" z="1"/><camera id="camera" z="554.256"/><object3D id="object" primitive="box" z="-0.5"/><shape id="bottom" shape="rect" width="8" height="8" z="-1"/>"#,
+        );
+        let doc = scene::read::read(&text, &Default::default()).unwrap();
+        let errors: Vec<_> = validate::validate(&doc.doc).into_iter().filter(|d| d.is_error()).collect();
+        assert!(errors.is_empty(), "fixture must validate: {errors:?}");
+        let resolved = resolve(&doc, &Default::default()).unwrap();
+        // -1 draws first, camera/object both stack at 0 in document order, then +1.
+        assert_eq!(resolved.nodes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["bottom", "camera", "object", "top"]);
+        assert_eq!(resolved.nodes[1].attributes["z"], "554.256");
+        assert_eq!(resolved.nodes[2].attributes["z"], "-0.5");
+    }
+
+    #[test]
+    fn scene_fractional_depth_survives_overlay_export_and_reimport() {
+        for node in [
+            r#"<camera id="subject" z="-554.2560000000001"/>"#,
+            r#"<object3D id="subject" primitive="box" z="0.125" depth="10.25"/>"#,
+            r#"<blackHole id="subject" mass="1" z="-7.900000000000001"/>"#,
+        ] {
+            // Depth remains its original decimal text in the overlay, with no integer conversion.
+            let text = document(node);
+            let original = scene::read::read(&text, &Default::default()).unwrap();
+            let original = original.doc.descendants().find(|n| n.attribute("id") == Some("subject")).unwrap();
+            let (imported, overlays, _) = scene::import(text.as_bytes(), &ImportOptions::default()).unwrap();
+            assert_eq!(overlays.len(), 1);
+            let overlay = &overlays[0];
+            let overlay_text = std::str::from_utf8(&overlay.document).unwrap();
+            let overlay_doc = scene::read::read(overlay_text, &Default::default()).unwrap();
+            let subject = overlay_doc.doc.descendants().find(|n| n.attribute("id") == Some("subject")).unwrap();
+            assert_eq!(subject.attribute("z"), original.attribute("z"));
+            assert_eq!(subject.attribute("depth"), original.attribute("depth"));
+            let (_, again, _) = scene::import(&overlay.document, &ImportOptions::default()).unwrap();
+            let again_text = std::str::from_utf8(&again[0].document).unwrap();
+            let again_doc = scene::read::read(again_text, &Default::default()).unwrap();
+            let subject = again_doc.doc.descendants().find(|n| n.attribute("id") == Some("subject")).unwrap();
+            assert_eq!(subject.attribute("z"), original.attribute("z"));
+            assert_eq!(subject.attribute("depth"), original.attribute("depth"));
+
+            // Sequence export references the overlay as media; it does not inline geometric nodes.
+            let (exported, _) = crate::export(&imported.project, imported.sequences[0], Format::Scene, &ExportOptions::default()).unwrap();
+            let (reimported, _, _) = scene::import(&exported, &ImportOptions::default()).unwrap();
+            assert!(reimported.project.items.values().any(|item| {
+                item.as_media().is_some_and(|media| matches!(&media.media, filmcraft_project::MediaRef::File { path } if path == &overlay.path))
+            }));
+        }
     }
 }

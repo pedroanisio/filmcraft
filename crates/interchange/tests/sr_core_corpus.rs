@@ -577,7 +577,6 @@ struct KnownRegression {
 }
 
 const KNOWN_REGRESSIONS: &[KnownRegression] = &[
-    KnownRegression { file: "fractional-depth", stage: "import", codes: &[], message: Some("sr-core scene parse error: \"-0.5\" is not an integer") },
     KnownRegression { file: "material-override", stage: "import", codes: &["MOV2"], message: None },
     KnownRegression {
         file: "external-expression",
@@ -606,7 +605,10 @@ macro_rules! regression_test {
         }
     };
 }
-regression_test!(scene_corpus_fractional_depth, "fractional-depth", "S11: 3D z is parsed as an integer stacking index");
+#[test]
+fn scene_corpus_fractional_depth() {
+    regression("fractional-depth", include_str!("fixtures/scene/corpus/fractional-depth.scene"));
+}
 regression_test!(scene_corpus_material_override, "material-override", "S11: overlay closure loses materialOverride material ids");
 regression_test!(scene_corpus_geodesic_camera, "geodesic-camera", "S11: overlay closure loses the implicit blackHole dependency");
 regression_test!(scene_corpus_voxel_palette, "voxel-palette", "S11: overlay closure loses palette material ids");
