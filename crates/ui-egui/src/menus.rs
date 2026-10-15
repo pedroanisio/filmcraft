@@ -583,7 +583,7 @@ fn invoke_inner(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut param
     }
     // File dialogs for commands that need a path.
     if (id == "file.import" && params.get("paths").is_none() && params.get("path").is_none())
-        || (matches!(id, "file.importImageSequence" | "file.importScene") && params.get("path").is_none())
+        || (matches!(id, "file.importImageSequence" | "file.importScene" | "file.importVpkg") && params.get("path").is_none())
         || (id == "file.saveAs" && params.get("path").is_none())
         || (id == "file.saveCopy" && params.get("path").is_none())
         || (id == "file.open" && params.get("path").is_none())
@@ -1159,5 +1159,41 @@ mod scene_fix_tests {
         assert!(r.is_ok(), "scene menu must open its picker: {r:?}");
         assert_eq!(r.unwrap(), serde_json::json!({"dialog":"open"}));
         assert!(app.native_dialog_open());
+    }
+}
+
+#[cfg(test)]
+mod vpkg_tests {
+    #[test]
+    fn vpkg_import_menu_opens_dialog() {
+        let mut app = crate::FilmcraftApp::new(filmcraft_engine::Session::default());
+        app.hooks.run_dialog = Some(Box::new(|dialog| {
+            assert!(matches!(dialog, crate::native_dialogs::FileDialog::OpenFiles { exts } if exts == ["zip"]));
+            std::sync::mpsc::channel().1
+        }));
+        let r = super::invoke(&mut app, &egui::Context::default(), "file.importVpkg", serde_json::json!({})).unwrap();
+        assert_eq!(r, serde_json::json!({"dialog":"open"}));
+        assert!(app.native_dialog_open());
+    }
+    #[test]
+    fn vpkg_export_menu_has_save_filter() {
+        assert!(crate::EXPORT_SAVE_DIALOGS.contains(&("file.exportVpkg", "Scene package (.vpkg.zip)", "vpkg.zip")));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn vpkg_fix_ru_uk_translations() {
+    for (language, catalog) in [("ru", include_str!("i18n/ru.tsv")), ("uk", include_str!("i18n/uk.tsv"))] {
+        for key in ["Scene Package…", "Scene package (.vpkg.zip)"] {
+            assert!(
+                catalog.lines().any(|line| {
+                    let mut fields = line.split('\t');
+                    fields.next();
+                    fields.next() == Some(key) && fields.next().is_some_and(|value| !value.is_empty() && value != key)
+                }),
+                "{language}: missing {key}"
+            );
+        }
     }
 }

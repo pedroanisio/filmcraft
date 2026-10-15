@@ -16,7 +16,8 @@ pub fn detect(path: &str, bytes: &[u8]) -> Option<Format> {
     filmcraft_interchange::detect(bytes, ext.as_deref())
 }
 
-fn report_json(r: &filmcraft_interchange::Report) -> Vec<String> {
+/// Report messages shared by document and package command results.
+pub(crate) fn report_json(r: &filmcraft_interchange::Report) -> Vec<String> {
     r.entries.iter().map(|e| if e.count > 1 { format!("{} (×{})", e.message, e.count) } else { e.message.clone() }).collect()
 }
 
@@ -271,20 +272,40 @@ pub fn import_scene(s: &mut Session, params: &Value) -> Result<Value> {
         return s.execute("file.import", json!({"paths": [path]}));
     }
     let bytes = crate::scene_render::read(path, &*s.services)?;
+    let prepared = prepare_scene(s, path, &bytes, mode, lenient)?;
+    // Write before editing: a full disk must not leave a partly merged project.
+    for overlay in &prepared.overlays {
+        write_overlay(s, &overlay.path, &overlay.document)?;
+    }
+    finish_scene(s, prepared)
+}
+
+/// A parsed scene ready for destination preflight, writes, and a single project merge.
+pub(crate) struct PreparedScene {
+    pub(crate) fragment: filmcraft_interchange::Imported,
+    pub(crate) overlays: Vec<filmcraft_interchange::scene::import::Overlay>,
+    report: filmcraft_interchange::Report,
+    name: String,
+}
+
+/// Prepare without opening media or writing overlays, so package imports can preflight all paths.
+pub(crate) fn prepare_scene(s: &Session, path: &str, bytes: &[u8], mode: &str, lenient: bool) -> Result<PreparedScene> {
     let opts = options(path, lenient, Format::Scene);
     let (fragment, overlays, report) = if mode == "native" {
         // The generic scene dispatcher already refuses overlays or drops them with a loss report.
-        let (fragment, report) = read_fragment(s, path, &bytes, Format::Scene, &opts)?;
+        let (fragment, report) = read_fragment(s, path, bytes, Format::Scene, &opts)?;
         (fragment, Vec::new(), report)
     } else {
-        filmcraft_interchange::scene::import(&bytes, &opts).map_err(|e| import_error(path, e))?
+        filmcraft_interchange::scene::import(bytes, &opts).map_err(|e| import_error(path, e))?
     };
-    // Write before editing: a full disk must not leave a partly merged project.
-    for overlay in &overlays {
-        write_overlay(s, &overlay.path, &overlay.document)?;
-    }
+    Ok(PreparedScene { fragment, overlays, report, name: opts.name.unwrap_or_else(|| "Scene".into()) })
+}
+
+/// Merge a prepared scene after its caller has successfully written every overlay.
+pub(crate) fn finish_scene(s: &mut Session, prepared: PreparedScene) -> Result<Value> {
+    let PreparedScene { fragment, overlays, report, name } = prepared;
     let before: std::collections::HashSet<ItemId> = s.project.items.keys().copied().collect();
-    let mut result = merge(s, fragment, &report, Format::Scene, opts.name.as_deref().unwrap_or("Scene"))?;
+    let mut result = merge(s, fragment, &report, Format::Scene, &name)?;
     let paths: std::collections::HashSet<&str> = overlays.iter().map(|overlay| overlay.path.as_str()).collect();
     let merged: Vec<Value> = s
         .project
@@ -315,14 +336,7 @@ fn write_overlay(s: &Session, path: &str, bytes: &[u8]) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(EngineError::Other(format!("{path}: {error}"))),
     }
-    if s.services.is_filesystem_backed(path) {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(dir) = std::path::Path::new(path).parent().filter(|dir| !dir.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
-        }
-        #[cfg(target_arch = "wasm32")]
-        return Err(EngineError::Other("scene overlays require in-memory file services on the web".into()));
-    }
+    s.services.create_parent_dirs(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     s.services.write_file(path, bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
 
@@ -351,15 +365,20 @@ pub fn export(s: &mut Session, p: &Value) -> Result<Value> {
         name: s.project.item(seq).map(|i| i.name.clone()),
         ..Default::default()
     };
-    let (bytes, report) = filmcraft_interchange::export(&s.project, seq, format, &opts).map_err(|e| {
+    let (bytes, report) = export_document(s, seq, format, &opts)?;
+    s.services.write_file(&path, &bytes).map_err(|e| EngineError::Other(e.to_string()))?;
+    Ok(json!({"path": path, "bytes": bytes.len(), "report": report_json(&report)}))
+}
+
+/// Shared serialization path for document files and scene packages.
+pub(crate) fn export_document(s: &Session, seq: ItemId, format: Format, opts: &ExportOptions) -> Result<(Vec<u8>, filmcraft_interchange::Report)> {
+    filmcraft_interchange::export(&s.project, seq, format, opts).map_err(|e| {
         let message = e.to_string();
         match e {
             filmcraft_interchange::Error::Invalid(diagnostics) => EngineError::InvalidScene { message, diagnostics },
             _ => EngineError::Other(message),
         }
-    })?;
-    s.services.write_file(&path, &bytes).map_err(|e| EngineError::Other(e.to_string()))?;
-    Ok(json!({"path": path, "bytes": bytes.len(), "report": report_json(&report)}))
+    })
 }
 
 #[cfg(test)]

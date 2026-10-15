@@ -1352,6 +1352,24 @@ fn build() -> Vec<CommandSpec> {
         cmd!("scene.renderer.status", "Scene Renderer Status", ["Help"], None, "{}", always, |s, p| crate::scene_render::status(s, p)),
         cmd!("scene.renderer.clearCache", "Clear Scene Render Cache", [], None, "{}", always, |s, p| crate::scene_render::clear_cache(s, p)),
         cmd!(
+            "file.importVpkg",
+            "Scene Package…",
+            ["File", "Import"],
+            None,
+            r#"{"path":str,"dir":str?,"mode":"rendered|native|hybrid"=hybrid,"lenient":bool=false}"#,
+            always,
+            crate::vpkg::import
+        ),
+        cmd!(
+            "file.exportVpkg",
+            "Scene package (.vpkg.zip)",
+            ["File", "Export"],
+            None,
+            r#"{"path":str,"sequence":id?,"id":str?,"version":str?,"title":str?}"#,
+            has_seq,
+            crate::vpkg::export
+        ),
+        cmd!(
             "file.importScene",
             "Scene…",
             ["File", "Import"],

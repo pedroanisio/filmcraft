@@ -170,6 +170,7 @@ the original copyright and permission notice in its header.
 | `crates/vpkg/src/manifest.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Adapted from sr-core `sr_core/vpkg/manifest.py`, commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
 | `crates/vpkg/src/zip.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Adapted from sr-core `sr_core/vpkg/pack.py` (compression policy and timestamps), commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
 | `crates/vpkg/src/verify.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Adapted from sr-core `sr_core/vpkg/archive.py`, `refs.py`, `pack.py` (output globs), commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
+| `crates/engine/src/vpkg.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Input/cache attribute classification, URI resolution and dependency traversal adapted from sr-core `sr_core/vpkg/refs.py` (`INPUTS`, `CACHES`, `_value_path`, `dependencies`, `scan`), commit `babeccf0`; classifier extended against vendored scene-render.xsd 1.7.0 | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
 | `crates/vpkg/src/write.rs` | Pedro Anisio Silva (sr-core), FilmCraft contributors | Adapted from sr-core `sr_core/vpkg/pack.py`, `readme.py`, commit `babeccf0` | MIT (`crates/interchange/schema/sr-core/LICENSE`) |
 
 ## Vendored specifications

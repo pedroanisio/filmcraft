@@ -261,9 +261,10 @@ const SCREENSHOT_SETTLE_MAX_S: f64 = 5.0;
 
 /// Export entries that run from the menus through the save panel: command, filter label,
 /// extension.
-pub(crate) const EXPORT_SAVE_DIALOGS: [(&str, &str, &str); 8] = [
+pub(crate) const EXPORT_SAVE_DIALOGS: [(&str, &str, &str); 9] = [
     ("markers.exportCsv", "Marker report (CSV)", "csv"),
     ("file.exportScene", "sr-core scene (.scene)", "scene"),
+    ("file.exportVpkg", "Scene package (.vpkg.zip)", "vpkg.zip"),
     ("file.exportEdl", "EDL", "edl"),
     ("file.exportFcp7Xml", "Final Cut Pro XML", "xml"),
     ("file.exportFcpxml", "FCPXML", "fcpxml"),
@@ -1293,13 +1294,15 @@ impl FilmcraftApp {
                     r
                 })
             }
-            "file.importScene" => {
+            "file.importScene" | "file.importVpkg" => {
                 let mut p = params.clone();
-                self.pick(FileDialog::open_files(&["scene", "xml"]), move |app, paths| {
+                let command = id.to_string();
+                let exts: &[&str] = if id == "file.importVpkg" { &["zip"] } else { &["scene", "xml"] };
+                self.pick(FileDialog::open_files(exts), move |app, paths| {
                     let Some(path) = paths.into_iter().next() else { return Ok(Value::Null) };
                     let object = p.as_object_mut().ok_or("expected an object")?;
                     object.insert("path".into(), json!(path));
-                    app.session.execute("file.importScene", p).map_err(|e| e.to_string())
+                    app.session.execute(&command, p).map_err(|e| e.to_string())
                 })
             }
             // File ▸ Import with Image Sequence: choose the first numbered still

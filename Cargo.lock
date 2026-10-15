@@ -1925,6 +1925,7 @@ dependencies = [
  "filmcraft-text",
  "filmcraft-time",
  "filmcraft-tts",
+ "filmcraft-vpkg",
  "image",
  "log",
  "serde",

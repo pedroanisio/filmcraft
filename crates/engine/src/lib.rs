@@ -56,6 +56,9 @@ pub mod sync;
 pub mod transcript;
 pub mod trim;
 pub mod voiceover;
+pub mod vpkg;
+#[cfg(test)]
+mod vpkg_tests;
 
 use std::sync::Arc;
 
@@ -95,12 +98,15 @@ pub enum EngineError {
     /// An invalid scene, retaining schema diagnostics alongside the contextual message.
     #[error("{message}")]
     InvalidScene { message: String, diagnostics: Vec<filmcraft_interchange::scene::Diagnostic> },
+    /// An invalid package, retaining integrity and path diagnostics.
+    #[error("{message}")]
+    InvalidPackage { message: String, diagnostics: Vec<filmcraft_vpkg::Diagnostic> },
     #[error("{0}")]
     Other(String),
 }
 
 impl EngineError {
-    /// Error payload with a message and structured scene diagnostics when available.
+    /// Error payload with a message and structured scene or package diagnostics when available.
     pub fn to_json(&self) -> Value {
         let mut value = serde_json::json!({"error": self.to_string()});
         if let Self::InvalidScene { diagnostics, .. } = self
@@ -115,6 +121,23 @@ impl EngineError {
                 })
                 .collect();
             object.insert("diagnostics".into(), Value::Array(diagnostics));
+        }
+        if let Self::InvalidPackage { diagnostics, .. } = self
+            && let Some(object) = value.as_object_mut()
+        {
+            object.insert(
+                "diagnostics".into(),
+                Value::Array(
+                    diagnostics
+                        .iter()
+                        .map(|d| {
+                            serde_json::json!({
+                                "severity": d.severity, "rule": d.code, "path": d.path, "line": 0, "message": d.message,
+                            })
+                        })
+                        .collect(),
+                ),
+            );
         }
         value
     }
@@ -136,6 +159,76 @@ pub trait Services: Send + Sync {
         let b = self.read_file(path)?;
         let a = (offset as usize).min(b.len());
         Ok(b[a..(a + len).min(b.len())].to_vec())
+    }
+    /// Read a file within a byte budget. Hosts should implement size/range reads without
+    /// materializing the whole file; native services enforce the cap on the open handle.
+    fn read_file_bounded(&self, path: &str, max_bytes: usize) -> std::io::Result<Vec<u8>> {
+        let size = self.file_size(path)?;
+        let size = usize::try_from(size).ok().filter(|n| *n <= max_bytes).ok_or_else(|| std::io::Error::other("file exceeds byte budget"))?;
+        let len = size.checked_add(1).ok_or_else(|| std::io::Error::other("file size overflow"))?;
+        let bytes = self.read_range(path, 0, len)?;
+        if bytes.len() != size {
+            return Err(std::io::Error::other("file changed while reading"));
+        }
+        Ok(bytes)
+    }
+    /// Whether a package's default extraction directory is absent or empty.
+    fn package_dir_empty(&self, dir: &str) -> std::io::Result<bool> {
+        if self.is_filesystem_backed(dir) {
+            return match std::fs::read_dir(dir) {
+                Ok(mut entries) => Ok(entries.next().transpose()?.is_none()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+                Err(e) => Err(e),
+            };
+        }
+        match self.list_entries(dir) {
+            Some(Ok(names)) => Ok(names.is_empty()),
+            Some(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            Some(Err(e)) => Err(e),
+            None => Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "host cannot inspect extraction directory; supply an explicit dir")),
+        }
+    }
+    /// Resolve a safe archive name under a destination, refusing native links and non-file targets.
+    /// Virtual hosts with aliases must override this to enforce their own containment rules.
+    fn package_path(&self, dir: &str, relative: &str) -> std::io::Result<String> {
+        if dir.len() > 16 << 10
+            || relative.len() > filmcraft_vpkg::Limits::default().max_name_bytes
+            || !filmcraft_vpkg::zip::safe_path(relative)
+            || relative.split('/').any(package_device_name)
+        {
+            return Err(std::io::Error::other("unsafe extraction path"));
+        }
+        if self.is_filesystem_backed(dir) {
+            return native_package_path(dir, relative);
+        }
+        Ok(std::path::Path::new(dir).join(relative).to_string_lossy().into_owned())
+    }
+    /// Create parent folders for a host file. Virtual stores need no native directories.
+    fn create_parent_dirs(&self, path: &str) -> std::io::Result<()> {
+        if self.is_filesystem_backed(path)
+            && let Some(parent) = std::path::Path::new(path).parent().filter(|p| !p.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+        Ok(())
+    }
+    /// Write a verified package entry, rechecking containment and refusing different existing bytes.
+    /// Hosts with concurrent writers should override this with atomic create-new semantics.
+    fn write_package_file(&self, dir: &str, relative: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let path = self.package_path(dir, relative)?;
+        match self.file_size(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.create_parent_dirs(&path)?;
+                return self.write_file(&path, bytes);
+            }
+            Err(e) => return Err(e),
+            Ok(_) => {}
+        }
+        if self.read_file_bounded(&path, bytes.len())? == bytes {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "file already exists with different content"))
+        }
     }
     /// A random-access reader for a media file, so containers are opened without reading the
     /// whole file (web: `Blob` range reads). `None`: the host has none; media are read whole.
@@ -179,6 +272,96 @@ pub trait Services: Send + Sync {
     }
 }
 
+fn package_device_name(name: &str) -> bool {
+    // Windows resolves these names as devices even when they carry an extension.
+    let stem = name.split('.').next().unwrap_or("").trim_end_matches(' ').to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$" | "CONIN$" | "CONOUT$")
+        || stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|suffix| matches!(suffix, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
+}
+
+fn native_package_path(dir: &str, relative: &str) -> std::io::Result<String> {
+    let root = std::path::absolute(dir)?;
+    let mut ancestor = root.as_path();
+    // Canonicalize the existing prefix even when the extraction directory does not exist yet.
+    let base = loop {
+        match std::fs::canonicalize(ancestor) {
+            Ok(existing) => break existing.join(root.strip_prefix(ancestor).map_err(std::io::Error::other)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                ancestor = ancestor.parent().ok_or(e)?;
+            }
+            Err(e) => return Err(e),
+        }
+    };
+    let mut target = base.clone();
+    let mut parts = relative.split('/').peekable();
+    while let Some(part) = parts.next() {
+        target.push(part);
+        match std::fs::symlink_metadata(&target) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || (parts.peek().is_some() && !metadata.is_dir()) || (parts.peek().is_none() && !metadata.is_file()) {
+                    return Err(std::io::Error::other("extraction path contains a link or incompatible file type"));
+                }
+                if !std::fs::canonicalize(&target)?.starts_with(&base) {
+                    return Err(std::io::Error::other("extraction path escapes destination"));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    target.into_os_string().into_string().map_err(|_| std::io::Error::other("extraction path is not UTF-8"))
+}
+
+fn write_new_package_file(path: &str, bytes: &[u8], write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>) -> std::io::Result<()> {
+    use std::{
+        hash::BuildHasher,
+        io::{Seek, Write},
+    };
+    let destination = std::path::Path::new(path);
+    let parent = destination.parent().ok_or_else(|| std::io::Error::other("package destination needs a parent"))?;
+    let random = std::collections::hash_map::RandomState::new();
+    let mut staging = None;
+    for attempt in 0..32_u8 {
+        let name = parent.join(format!(".filmcraft-vpkg-{:016x}.tmp", random.hash_one((std::process::id(), attempt))));
+        match std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&name) {
+            Ok(file) => {
+                staging = Some((name, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    let (staging, mut file) = staging.ok_or_else(|| std::io::Error::other("could not reserve package staging file after 32 attempts"))?;
+    let result = write(&mut file, bytes).and_then(|()| {
+        match std::fs::hard_link(&staging, destination) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::Unsupported => {
+                // Best effort on filesystems without hard links: exclusive creation still never clobbers.
+                // A failed copy leaves the destination for the user; it is never unlinked by pathname.
+                let mut output = std::fs::OpenOptions::new().write(true).create_new(true).open(destination)?;
+                let result = file.rewind().and_then(|()| std::io::copy(&mut file, &mut output)).and_then(|_| output.flush()).and_then(|()| output.sync_all());
+                result
+                    .map_err(|error| std::io::Error::new(error.kind(), format!("{error}; incomplete destination retained at {path} (hard links unsupported)")))
+            }
+            Err(error) => Err(error),
+        }
+    });
+    drop(file);
+    // Only the operation-owned staging name is removed, even if someone replaces the destination.
+    if let Err(cleanup) = std::fs::remove_file(&staging) {
+        return Err(std::io::Error::other(format!(
+            "{}; staging file retained at {}: {cleanup}",
+            result.as_ref().err().map_or_else(|| "package file published".into(), ToString::to_string),
+            staging.display()
+        )));
+    }
+    result
+}
+
 /// Native filesystem services.
 pub struct FsServices;
 impl Services for FsServices {
@@ -192,6 +375,44 @@ impl Services for FsServices {
     fn write_file(&self, path: &str, data: &[u8]) -> std::io::Result<()> {
         // Atomic + durable: temp file in the same directory, fsync, rename, fsync the directory.
         filmcraft_format::atomic_write(std::path::Path::new(path), data)
+    }
+    fn write_package_file(&self, dir: &str, relative: &str, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
+        let path = self.package_path(dir, relative)?;
+        self.create_parent_dirs(&path)?;
+        let path = self.package_path(dir, relative)?;
+        // Pre-write checks assume no concurrent local attacker swaps parent directories during import.
+        match write_new_package_file(&path, bytes, |file, bytes| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        }) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if self.read_file_bounded(&path, bytes.len())? == bytes {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "file already exists with different content"))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+    fn read_file_bounded(&self, path: &str, max_bytes: usize) -> std::io::Result<Vec<u8>> {
+        use std::io::Read;
+        let file = std::fs::File::open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(std::io::Error::other("expected a regular file"));
+        }
+        let size = usize::try_from(metadata.len()).ok().filter(|n| *n <= max_bytes).ok_or_else(|| std::io::Error::other("file exceeds byte budget"))?;
+        let capacity = size.checked_add(1).ok_or_else(|| std::io::Error::other("file size overflow"))?;
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(capacity).map_err(std::io::Error::other)?;
+        file.take(capacity as u64).read_to_end(&mut bytes)?;
+        if bytes.len() != size {
+            return Err(std::io::Error::other("file changed while reading"));
+        }
+        Ok(bytes)
     }
     fn file_size(&self, path: &str) -> std::io::Result<u64> {
         let m = std::fs::metadata(path)?;

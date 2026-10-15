@@ -164,6 +164,57 @@ interchange importer. A native scene imported this way refuses overlays unless l
 as a validated scene document. `file.exportScene {path, sequence?}` is the File ▸ Export ▸
 sr-core scene (.scene) menu command and opens a `.scene` save dialog when no path is supplied.
 
+`file.importVpkg {path: str, dir?: str, mode?: "rendered" | "native" | "hybrid", lenient?: bool}`
+verifies a scene video package before writing any entry, extracts it through host services, then
+imports its primary scene through `file.importScene`. Mode defaults to `hybrid`, lenient to `false`.
+File ▸ Import ▸ Scene Package… opens a ZIP picker. The default extraction directory is the sibling
+package stem (`demo.vpkg.zip` → `demo/`); an existing nonempty default directory is refused.
+An explicit `dir` may reuse identical files but cannot overwrite different content. Unsafe archive
+paths, Windows device names, and filesystem links under the extraction root are refused. Generated
+overlay destinations are checked before extraction and use the same exclusive package writer.
+These checks assume no concurrent local attacker swaps directories during import; that race is
+outside FilmCraft’s threat model.
+Extraction failure leaves the project and undo history unchanged. Native services write to an
+unpredictable, exclusively created staging file in the destination directory, then publish with a
+no-clobber hard link and remove only the staging name. If hard links report unsupported, a best-effort
+exclusive-create copy is used; a failed copy retains the incomplete destination and names it in the
+error. Cleanup never unlinks a public destination; failed staging cleanup reports its path.
+The error also names the extraction directory and earlier retained files, which can be reused by
+retrying with an explicit `dir`. A successful import, including synchronous Copy ingest, is one
+undo step; undo does not delete extracted or ingested files.
+
+Package input references use the verifier's URI rules: strip query/fragment suffixes and decode
+percent escapes once, except image-sequence patterns. Resolved local paths must stay inside the
+extraction root. Nonlocal inputs are refused before extraction. Native import consumes normalized
+XML in memory. Import writes derived `<document>.filmcraft.scene` copies for the primary scene and
+reachable includes, preserving the verified original bytes. Derived files use the same
+containment, collision and failure checks as archive entries. The combined destination set rejects
+file/directory prefix conflicts and portable case aliases before any write. Reachable includes and
+glTF/GLB, OBJ/MTL and MaterialX dependencies are checked with a seen-set and bounded work. Include
+hashes are omitted from derived documents because they authenticated the preserved originals.
+Missing inputs may remain offline, but existing files without verified package bytes are refused.
+Dependency paths with URI escapes or suffixes are refused in these secondary formats, whose loaders
+use different path rules. Programs, Lottie, SVG, USD/FBX, srvseq manifests, file-backed map styles and
+local OCIO configurations are refused when their dependency graph cannot be safely inspected.
+Built-in map styles, material asset IDs and built-in `ocio://` configurations remain supported.
+
+The result is the scene import result plus
+`package: {id, version, title, primaryScene, extractedTo, warnings: [{severity, code, path, message}]}`.
+`primaryScene` is relative to the extracted `project/` folder. Package validation errors return
+`{error, diagnostics: [{severity, rule, path, line, message}]}` like scene errors, with `line: 0`.
+Package verification is always strict, including with `lenient: true`. Fetch declarations and
+pipeline outputs are verified as declarations; importing never downloads files or runs pipelines.
+
+`file.exportVpkg {path: str, sequence?: id, id?: str, version?: str, title?: str}` exports the chosen
+or active sequence with the same scene exporter, collects its referenced media through host services,
+and packs a format 1.1 archive. Defaults: a slug of the sequence name for `id`, `"1.0.0"` for
+`version`, and the sequence name for `title`. Media are relocated to deterministic unique
+`assets/` names; missing media fail with the source filename. It returns `{path, bytes, report}`.
+File ▸ Export ▸ Scene package (.vpkg.zip) opens a package save dialog. Exports use the packer's
+fixed timestamp (`source_date_epoch: None`); the engine does not read `SOURCE_DATE_EPOCH`.
+Both commands reject unknown keys, wrong types, overlong values, control characters and parent
+components in command paths. Package resource limits apply before file reads and packing.
+
 Both renderer commands reject extra fields and non-object parameters. `prefs.set` accepts
 `plugins.sceneRenderPath` (empty searches `FILMCRAFT_SCENE_RENDER`, then `PATH`) and
 `plugins.sceneRenderPreviewQuality` (`draft` or `preview`, default `preview`). Renderer, quality or
