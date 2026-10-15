@@ -1,0 +1,36 @@
+{
+  "task_id": "task-1791944225350-d5bb",
+  "agent_id": "engine2",
+  "objective": "Fix round 2: retain control diagnostics and virtual scene placeholders across reopening/export; distinguish storage from export mode",
+  "declared_files": [
+    "crates/engine/src/lib.rs",
+    "crates/engine/src/interchange.rs",
+    "crates/engine/src/media_pool.rs",
+    "crates/engine/src/scene_interchange_tests.rs",
+    "crates/ui-egui/src/menus.rs",
+    "crates/ui-egui/src/control.rs",
+    "docs/control-protocol.md"
+  ],
+  "status": "completed",
+  "opened_at": "2026-10-14T02:17:05.350192+00:00",
+  "updated_at": "2026-10-14T02:24:20.782046+00:00",
+  "scope_changes": [
+    {
+      "action": "added",
+      "file": "docs/control-protocol.md",
+      "reason": "Document storage predicate independent of export encoding",
+      "timestamp": "2026-10-14T02:19:20.072584+00:00"
+    }
+  ],
+  "closed_at": "2026-10-14T02:24:20.782046+00:00",
+  "actual_files": [
+    "crates/engine/src/lib.rs",
+    "crates/engine/src/interchange.rs",
+    "crates/engine/src/media_pool.rs",
+    "crates/engine/src/scene_interchange_tests.rs",
+    "crates/ui-egui/src/menus.rs",
+    "crates/ui-egui/src/control.rs",
+    "docs/control-protocol.md"
+  ],
+  "result_summary": "Control diagnostics retained; precise filesystem capability keeps virtual scenes placeholders across cache clearing/export while disk scenes render. VM clippy/layers passed; engine 670 passed, 3 ignored; automation 22; CLI 30; UI control 15."
+}

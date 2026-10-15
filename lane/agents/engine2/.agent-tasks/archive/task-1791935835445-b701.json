@@ -1,0 +1,40 @@
+{
+  "task_id": "task-1791935835445-b701",
+  "agent_id": "engine2",
+  "objective": "S8/B7 fix round 1",
+  "declared_files": [
+    "crates/engine/src/lib.rs",
+    "crates/engine/src/interchange.rs",
+    "crates/engine/src/scene_render.rs",
+    "crates/engine/src/commands.rs",
+    "crates/engine/src/scene_interchange_tests.rs",
+    "crates/engine/src/tests.rs",
+    "crates/ui-egui/src/lib.rs",
+    "crates/ui-egui/src/menus.rs",
+    "crates/automation/src/lib.rs",
+    "crates/automation/src/server.rs",
+    "crates/automation/src/bridge.rs",
+    "apps/filmcraft-cli/src/main.rs",
+    "docs/control-protocol.md"
+  ],
+  "status": "failed",
+  "opened_at": "2026-10-13T23:57:15.445798+00:00",
+  "updated_at": "2026-10-14T00:31:11.417744+00:00",
+  "closed_at": "2026-10-14T00:31:11.417744+00:00",
+  "result_summary": "Permitted fixes implemented and gated; awaiting scope approval for media_pool.rs and control.rs. Unapplied patch prepared. Engine has two known reopening regression failures; desktop control diagnostic test remains red.",
+  "actual_files": [
+    "apps/filmcraft-cli/src/main.rs",
+    "crates/automation/src/bridge.rs",
+    "crates/automation/src/lib.rs",
+    "crates/automation/src/server.rs",
+    "crates/engine/src/commands.rs",
+    "crates/engine/src/interchange.rs",
+    "crates/engine/src/lib.rs",
+    "crates/engine/src/scene_render.rs",
+    "crates/engine/src/tests.rs",
+    "crates/ui-egui/src/lib.rs",
+    "crates/ui-egui/src/menus.rs",
+    "docs/control-protocol.md",
+    "crates/engine/src/scene_interchange_tests.rs"
+  ]
+}

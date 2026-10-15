@@ -1,0 +1,23 @@
+{
+  "task_id": "task-1791972718884-f101",
+  "agent_id": "fixoverlay",
+  "objective": "Coalesce dependency-promoted overlays and validate S11 fix round 1",
+  "declared_files": [
+    "crates/interchange/src/scene/import.rs",
+    "crates/interchange/src/scene/import/overlay.rs",
+    "crates/interchange/src/scene/import/tests.rs",
+    "crates/interchange/src/scene/import/group.rs",
+    "crates/interchange/tests/sr_core_corpus.rs"
+  ],
+  "status": "completed",
+  "opened_at": "2026-10-14T10:11:58.875465+00:00",
+  "updated_at": "2026-10-14T10:34:24.343427+00:00",
+  "closed_at": "2026-10-14T10:34:24.343427+00:00",
+  "result_summary": "Overlay coalescing and enclosing intervals complete. VM fmt/clippy/full tests/Wasm green: 331 tests, 51 Wasm crates. Assigned corpus categories zero; unchanged 83 other-category failures, no added records.",
+  "actual_files": [
+    "crates/interchange/src/scene/import.rs",
+    "crates/interchange/src/scene/import/overlay.rs",
+    "crates/interchange/src/scene/import/tests.rs",
+    "crates/interchange/tests/sr_core_corpus.rs"
+  ]
+}

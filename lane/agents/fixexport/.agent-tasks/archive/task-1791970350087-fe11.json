@@ -1,0 +1,20 @@
+{
+  "task_id": "task-1791970350087-fe11",
+  "agent_id": "fixexport",
+  "objective": "Fix S11 linked audio duplication and 10000-siblings export budget",
+  "declared_files": [
+    "crates/interchange/src/scene/export.rs",
+    "crates/interchange/tests/sr_core_corpus.rs",
+    "crates/interchange/src/scene/export/tests.rs"
+  ],
+  "status": "completed",
+  "opened_at": "2026-10-14T09:32:30.087506+00:00",
+  "updated_at": "2026-10-14T10:05:27.693600+00:00",
+  "closed_at": "2026-10-14T10:05:27.693600+00:00",
+  "actual_files": [
+    "crates/interchange/src/scene/export.rs",
+    "crates/interchange/src/scene/export/tests.rs",
+    "crates/interchange/tests/sr_core_corpus.rs"
+  ],
+  "result_summary": "Fixed both S11 export regressions; 322 tests, clippy, fmt, wasm green; corpus linked-audio 18 -> 0, siblings green, all other categories unchanged."
+}

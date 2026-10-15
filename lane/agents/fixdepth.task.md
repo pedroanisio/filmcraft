@@ -1,0 +1,12 @@
+**S11 fix: fractional geometric depth on scene import.** 11 corpus cases fail with `"554.256" is not an integer`. `crates/interchange/src/scene/resolve.rs:1275` (`finish_paint`) applies the integer 2D stacking-z parser to the depth of 3D and camera nodes. Separate the two: a 2D stacking index (integer, where the XSD says so) and 3D geometric depth (a finite length or number). Check every attribute per the XSD types in `crates/interchange/schema/sr-core/scene-render.xsd`, and against `/home/admin/src/scene-render/crates/sr-model`. Then check whether `scene/export.rs` writes depth back with the right type, so that export and re-import keep fractional depth exactly.
+
+## Scope (you may edit)
+- `crates/interchange/src/scene/resolve.rs`, `crates/interchange/src/scene/values.rs`, and the depth emission in `crates/interchange/src/scene/export.rs` (only if needed).
+- `crates/interchange/tests/sr_core_corpus.rs`: only the `fractional-depth` ignore and its known-regression entries.
+
+## Shared rules for this fix
+- `crates/interchange/tests/sr_core_corpus.rs` has your regressions as `#[ignore = "S11: …"]` tests plus entries in `KNOWN_REGRESSIONS`. Their failing cases, causes and proposed fixes are listed in `/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/agents/corpus/findings.json` (filter by `regression_fixture`). The fixtures under `crates/interchange/tests/fixtures/scene/corpus/` are your red tests.
+- TDD: run the ignored test with `--ignored` on the VM and see it fail first. Then fix it, remove the `#[ignore]` and its `KNOWN_REGRESSIONS` entries, and see it pass. Add focused unit tests next to the code you change, with expected values worked out by hand from the XSD documentation and the reference renderer.
+- In the test file, you may only remove your own ignores and known-regression entries. Do not touch other categories; another agent fixes them in parallel.
+- Gate (VM): `cargo fmt --check && cargo clippy -p filmcraft-interchange --all-targets -- -D warnings && cargo test -p filmcraft-interchange && cargo xtask wasm`, then the corpus: `SR_CORE_REV=babeccf0ca0cb2603b8f6a1d3cb07388b7d7a2cc SR_CORE_DIR=$HOME/sr-core cargo test -p filmcraft-interchange --test sr_core_corpus -- --nocapture`. Your categories must report 0 failures. Report the other categories' counts unchanged or lower. A rise is a regression you caused.
+- Reply HANDOFF with: the cause found, the fix, the red→green log, the corpus summary before and after, any borrowed scene-render code (file names), and the gate result.

@@ -1,0 +1,67 @@
+{
+  "review_findings": {
+    "accepted": [
+      1,
+      2,
+      3
+    ],
+    "rejected": [],
+    "animation_guard": "Existing guard retained; temporary removal killed by new test"
+  },
+  "gate": {
+    "exit_code": 0,
+    "fmt": "passed",
+    "clippy": "passed -D warnings",
+    "tests_passed_failed_ignored": [
+      324,
+      0,
+      6
+    ],
+    "wasm_crates": 51
+  },
+  "export_tests_passed": 46,
+  "corpus": {
+    "exit_code": 101,
+    "before_failure_records": 183,
+    "after_failure_records": 183,
+    "new_failure_identities": [],
+    "removed_failure_identities": [],
+    "comparison_key": "case, mode, stage, codes; test stdout interleaves with two raw diagnostic lines",
+    "categories": {
+      "fractional-depth": 11,
+      "external-expression": 122,
+      "material-override": 6,
+      "geodesic-camera": 18,
+      "voxel-palette": 14,
+      "generated-id": 12,
+      "linked-audio": 0
+    },
+    "summary_lines": [
+      "linked-audio: 1 cases, 2 imported, 0 refused as expected, 2 exported, 0 oracle-checked, 0 skips, 0 failures",
+      "import modes: 1 strict, 1 lenient; 4 successful re-imports",
+      "import modes: 1 strict, 1 lenient; 4 successful re-imports",
+      "import modes: 3 strict, 3 lenient; 12 successful re-imports",
+      "10000 siblings regression: 1 cases, 2 imported, 0 refused as expected, 2 exported, 0 oracle-checked, 0 skips, 0 failures",
+      "import modes: 1 strict, 1 lenient; 4 successful re-imports",
+      "import modes: 2 strict, 2 lenient; 8 successful re-imports",
+      "sr-core corpus: 1343 cases, 1676 imported, 344 refused as expected, 1676 exported, 1676 oracle-checked, 232 skips, 183 failures",
+      "import modes: 816 strict, 860 lenient; 3352 successful re-imports",
+      "test result: FAILED. 17 passed; 1 failed; 6 ignored; 0 measured; 0 filtered out; finished in 560.48s"
+    ]
+  },
+  "tdd": {
+    "scene_export_review_video_dissolve_keeps_audio_cut": "Red: 0 audioTrack placements, expected 2; green passed",
+    "scene_export_review_duplicate_clip_ids_return_error": "Red: returned XML instead of duplicate-ID error; green passed",
+    "scene_export_review_linked_volume_animation_uses_mix": "Mutation red with guard removed: 0 audioTrack placements, expected 1; restored guard green passed"
+  },
+  "borrowed_code": [],
+  "reference_sources": [
+    "crates/interchange/schema/sr-core/scene-render.xsd:1195,4873,6266",
+    "/home/admin/src/scene-render/crates/sr-deliver/src/audio.rs:166,292,460"
+  ],
+  "files": {
+    "crates/interchange/src/scene/export.rs": "a823ad768cecc8f1b74ba530f198ec2fba47be618e7fc622624915de9202ba04",
+    "crates/interchange/src/scene/export/tests.rs": "15e3de6977a7c953069e9797b435315c75c7bb2a796782d9d8ce4eda813a8978",
+    "crates/interchange/tests/sr_core_corpus.rs": "de7b1de8f0ab726ddbf9b558bf0dacae2a49937275597ccaf87b3e7b4c7fe31e"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "task_id": "task-1791969235572-fix1",
+  "agent_id": "corpus",
+  "objective": "S11 fix round 1: prevent harness false passes",
+  "declared_files": [
+    "crates/interchange/tests/sr_core_corpus.rs",
+    "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/agents/corpus/findings.json"
+  ],
+  "status": "completed",
+  "opened_at": "2026-10-14T09:13:55.572901+00:00",
+  "updated_at": "2026-10-14T09:29:06.968833+00:00",
+  "closed_at": "2026-10-14T09:29:06.968833+00:00",
+  "result_summary": "S11 fix round 1 complete: five harness defects fixed, TDD logged, 1343-case corpus audited, gate 313 passed / 8 ignored, findings updated.",
+  "actual_files": [
+    "crates/interchange/tests/sr_core_corpus.rs",
+    "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/agents/corpus/findings.json"
+  ]
+}

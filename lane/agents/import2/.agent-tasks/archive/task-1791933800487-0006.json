@@ -1,0 +1,37 @@
+{
+  "task_id": "task-1791933800487-0006",
+  "agent_id": "import2",
+  "objective": "S6 native scene import rows",
+  "declared_files": [
+    "crates/interchange/src/scene/import.rs",
+    "crates/interchange/src/scene/import/graphic.rs",
+    "crates/interchange/src/scene/import/group.rs",
+    "crates/interchange/src/scene/import/transition.rs",
+    "crates/interchange/src/scene/import/meta.rs",
+    "crates/interchange/src/scene/import/s6_tests.rs",
+    "crates/interchange/src/scene/import/tests.rs"
+  ],
+  "status": "completed",
+  "opened_at": "2026-10-13T23:23:20.487243+00:00",
+  "updated_at": "2026-10-13T23:46:40.590079+00:00",
+  "closed_at": "2026-10-13T23:46:40.590079+00:00",
+  "result_summary": "S6 implemented; VM clippy clean, 251 tests pass, wasm 50 crates. No commits.",
+  "actual_files": [
+    "crates/interchange/src/scene/import.rs",
+    "crates/interchange/src/scene/import/graphic.rs",
+    "crates/interchange/src/scene/import/group.rs",
+    "crates/interchange/src/scene/import/transition.rs",
+    "crates/interchange/src/scene/import/meta.rs",
+    "crates/interchange/src/scene/import/s6_tests.rs",
+    "crates/interchange/src/scene/import/tests.rs"
+  ],
+  "scope_changes": [
+    {
+      "action": "added",
+      "file": "crates/interchange/src/scene/import/tests.rs",
+      "reason": "Update S5 assertions for required nested sequence mapping",
+      "timestamp": "2026-10-13T23:34:36.278302+00:00"
+    }
+  ],
+  "blocked_by": null
+}

@@ -1,0 +1,58 @@
+{
+  "accepted_round2_findings": [
+    1,
+    2
+  ],
+  "rejected": [],
+  "gate": {
+    "exit_code": 0,
+    "fmt": "passed",
+    "clippy": "passed -D warnings",
+    "tests_passed_failed_ignored": [
+      329,
+      0,
+      6
+    ],
+    "wasm_crates": 51
+  },
+  "export_tests_passed": 51,
+  "corpus": {
+    "exit_code": 101,
+    "cases": 1343,
+    "exports_and_oracle_checks": 1676,
+    "successful_reimports": 3352,
+    "before_failure_records": 183,
+    "after_failure_records": 183,
+    "new_failure_identities": [],
+    "removed_failure_identities": [],
+    "categories": {
+      "fractional-depth": 11,
+      "external-expression": 122,
+      "material-override": 6,
+      "geodesic-camera": 18,
+      "voxel-palette": 14,
+      "generated-id": 12,
+      "linked-audio": 0,
+      "10000-siblings": 0
+    }
+  },
+  "tdd": {
+    "scene_export_review_subframe_linked_audio_uses_mix": "Red: 0 placements, expected 1; green passed (each endpoint and between-frame interval)",
+    "scene_export_review_reversed_linked_audio_uses_mix": "Red: 0 placements, expected 1; green passed",
+    "scene_export_review_varispeed_linked_audio_uses_mix": "Red: 0 placements, expected 1; green passed at 0.5x and 2x",
+    "scene_export_review_independent_varispeed_disables_pitch_preservation": "Red: preservePitch missing (attribute helper None); green passed",
+    "scene_export_review_rational_frame_grid_keeps_linked_audio": "Positive control passed before and after"
+  },
+  "borrowed_code": [],
+  "reference_sources": [
+    "sr-deliver/src/audio.rs:407,422,431,484",
+    "sr-audio/src/mix.rs:476-479",
+    "scene-render.xsd:6266,6319",
+    "filmcraft/crates/render/src/audio.rs:396"
+  ],
+  "files": {
+    "crates/interchange/src/scene/export.rs": "871201fb287d11aecc978e13d404b89119caaa1faed033adce467dcea337a4fa",
+    "crates/interchange/src/scene/export/tests.rs": "5222abe34056e4afeed5095dc18318afb3bd18a65e1d2bb3f646cfa53bcb6fbf",
+    "crates/interchange/tests/sr_core_corpus.rs": "de7b1de8f0ab726ddbf9b558bf0dacae2a49937275597ccaf87b3e7b4c7fe31e"
+  }
+}

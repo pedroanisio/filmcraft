@@ -1,0 +1,20 @@
+{
+  "task_id": "task-1791970393869-4476",
+  "agent_id": "fixoverlay",
+  "objective": "S11 bounded overlay dependency closure",
+  "declared_files": [
+    "crates/interchange/src/scene/import/overlay.rs",
+    "crates/interchange/tests/sr_core_corpus.rs"
+  ],
+  "status": "blocked",
+  "opened_at": "2026-10-14T09:33:13.869712+00:00",
+  "updated_at": "2026-10-14T10:08:21.175249+00:00",
+  "closed_at": "2026-10-14T10:08:21.175249+00:00",
+  "result_summary": "Five assigned corpus categories fixed (172 records to zero); no new corpus failures. Pending authorization for importer coalescing and stale test maintenance outside the permitted edit scope. fmt/clippy/Wasm pass; exact test gate blocked by obsolete refusal assertion.",
+  "actual_files": [
+    "crates/interchange/src/scene/import/overlay.rs",
+    "crates/interchange/tests/sr_core_corpus.rs"
+  ],
+  "scope_changes": [],
+  "blocked_by": null
+}

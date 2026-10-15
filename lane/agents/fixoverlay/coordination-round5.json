@@ -1,0 +1,22 @@
+{
+  "task_id": "task-1791980147500-9deb",
+  "agent_id": "fixoverlay",
+  "objective": "Round 5: suppress native mapping only for transitions fully preserved in an emitted overlay",
+  "declared_files": [
+    "crates/interchange/src/scene/import.rs",
+    "crates/interchange/src/scene/import/tests.rs",
+    "crates/interchange/src/scene/import/transition.rs",
+    "crates/interchange/src/scene/import/group.rs"
+  ],
+  "status": "completed",
+  "opened_at": "2026-10-14T12:15:47.500855+00:00",
+  "updated_at": "2026-10-14T12:45:25.145054+00:00",
+  "closed_at": "2026-10-14T12:45:25.145054+00:00",
+  "result_summary": "P2 accepted and fixed red-first: fully preserved transitions skip native mapping and warnings, partial/unpreserved transitions retain handling. VM gate green: 366 tests passed, 3 existing ignores, 51 Wasm crates. Pinned corpus: five assigned categories zero; all 83 unrelated failure records identical to fresh baseline (11 fractional-depth, 72 linked-audio). Changes uncommitted on 12003949; provenance and SAMPLE_REGRESSION unchanged.",
+  "actual_files": [
+    "crates/interchange/src/scene/import.rs",
+    "crates/interchange/src/scene/import/tests.rs",
+    "crates/interchange/src/scene/import/transition.rs",
+    "crates/interchange/src/scene/import/group.rs"
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "accepted_round3_findings": [
+    1
+  ],
+  "rejected": [],
+  "gate": {
+    "exit_code": 0,
+    "fmt": "passed",
+    "clippy": "passed -D warnings",
+    "tests_passed_failed_ignored": [
+      331,
+      0,
+      6
+    ],
+    "wasm_crates": 51
+  },
+  "export_tests_passed": 53,
+  "corpus": {
+    "exit_code": 101,
+    "cases": 1343,
+    "exports_and_oracle_checks": 1676,
+    "successful_reimports": 3352,
+    "before_failure_records": 183,
+    "after_failure_records": 183,
+    "new_failure_identities": [],
+    "removed_failure_identities": [],
+    "categories": {
+      "fractional-depth": 11,
+      "external-expression": 122,
+      "material-override": 6,
+      "geodesic-camera": 18,
+      "voxel-palette": 14,
+      "generated-id": 12,
+      "linked-audio": 0,
+      "10000-siblings": 0
+    },
+    "comparison_note": "Compared case/mode/stage/codes multisets after removing interleaved test-harness summary output."
+  },
+  "tdd": {
+    "scene_export_review_fractional_boundary_one_frame_uses_mix": "Red: 0 audioMix placements, expected 1; green passed, preserving start/duration/source on reimport",
+    "scene_export_review_fractional_boundary_sweep": "Red: 167 unsafe embedded intervals; green: none among 786 intervals across 24000/1001, 30000/1001, 60000/1001 (frames 0..127, 999, 10000, 1000000; lengths 1 and 7)"
+  },
+  "renderer_issue": {
+    "sources": [
+      "sr-deliver/src/audio.rs:422",
+      "sr-eval/src/eval.rs:1055",
+      "sr-audio/src/mix.rs:476"
+    ],
+    "scenario": "24000/1001 fps, layer frames [9,10), serialized start 0.375375. Frame 9 is evaluated at 0.37537499999999996 and fails inclusive-start comparison; frame 10 is excluded by end. Expected one frame of audio, actual silence. Longer intervals lose their first frame; upward-rounded ends can add an extra frame.",
+    "exporter_fix": "Require exact Tick frame alignment and previous frame time < serialized boundary <= current frame time at both endpoints; otherwise independent audioMix and linkage-loss warning."
+  },
+  "borrowed_code": [],
+  "files": {
+    "crates/interchange/src/scene/export.rs": "abd7bc240ff9c99864dbef2dbb997f81053e02067361d1690055da64c25cd74d",
+    "crates/interchange/src/scene/export/tests.rs": "1dce45222615f9050638ef422f4207f8cc06efffb624f542197ae7f40911f9a4",
+    "crates/interchange/tests/sr_core_corpus.rs": "de7b1de8f0ab726ddbf9b558bf0dacae2a49937275597ccaf87b3e7b4c7fe31e"
+  }
+}

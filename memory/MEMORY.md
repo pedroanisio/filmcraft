@@ -1,0 +1,3 @@
+- [sr-core / scene-render code grant](sr-core-scene-render-grant.md) — user wrote both; may borrow scene-render code into FilmCraft with provenance in ATTRIBUTION.md
+- [VM resources via govern](vm-resources-via-govern.md) — user approved freeing fc-build-01 disk (finished agents target dirs) via govern vm-free
+- [Lab resources are ephemeral](fc-build-01-recycled.md) — VMs are disposable unless stated; keep nothing only on a VM; provisioning must be scripted

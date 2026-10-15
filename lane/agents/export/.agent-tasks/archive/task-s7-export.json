@@ -1,0 +1,21 @@
+{
+  "task_id": "task-s7-export",
+  "agent_id": "export",
+  "objective": "S7 scene export with VM TDD",
+  "declared_files": [
+    "crates/interchange/src/scene/export.rs",
+    "crates/interchange/src/scene/export/tests.rs",
+    "crates/interchange/src/scene/mod.rs",
+    "crates/interchange/src/lib.rs"
+  ],
+  "status": "failed",
+  "opened_at": "2026-10-13T21:44:03.773792+00:00",
+  "closed_at": "2026-10-13T22:06:38.257868+00:00",
+  "result_summary": "Exporter implemented; final VM clippy/test/wasm green. Exact unrestricted frame-grid seconds blocked by existing f64 parser. Requires integrator decision.",
+  "actual_files": [
+    "crates/interchange/src/scene/export.rs",
+    "crates/interchange/src/scene/export/tests.rs",
+    "crates/interchange/src/scene/mod.rs",
+    "crates/interchange/src/lib.rs"
+  ]
+}

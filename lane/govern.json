@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "slug": "ops/filmcraft-scene",
+  "title": "FilmCraft option A: sr-core scene interchange (import, export, vpkg)",
+  "kind": "ops",
+  "lang": "en",
+  "stage": "doing",
+  "created": "2026-10-13T13:34:11.693Z",
+  "commands": {
+    "ci": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-run.sh",
+      "cargo",
+      "xtask",
+      "ci"
+    ],
+    "test": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-run.sh",
+      "cargo",
+      "test",
+      "-p",
+      "filmcraft-bitstream",
+      "-p",
+      "filmcraft-interchange",
+      "-p",
+      "filmcraft-engine"
+    ],
+    "clippy": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-run.sh",
+      "sh",
+      "-c",
+      "cargo fmt --check && cargo clippy -p filmcraft-bitstream -p filmcraft-interchange -p filmcraft-engine --all-targets -- -D warnings"
+    ],
+    "corpus": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-run.sh",
+      "sh",
+      "-c",
+      "SR_CORE_DIR=$HOME/sr-core cargo test -p filmcraft-interchange --test sr_core_corpus -- --nocapture"
+    ],
+    "ci-headless": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-run.sh",
+      "sh",
+      "-c",
+      "cargo fmt --check && cargo clippy --workspace --exclude filmcraft --all-targets -- -D warnings && cargo test --workspace --exclude filmcraft && cargo xtask layers && cargo xtask assets && cargo xtask wasm"
+    ],
+    "sync": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-sync.sh"
+    ],
+    "ci-head": [
+      "env",
+      "FC_SYNC_HEAD_ONLY=1",
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-run.sh",
+      "cargo",
+      "xtask",
+      "ci"
+    ],
+    "wip": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/wip.sh"
+    ],
+    "gate-wip": [
+      "env",
+      "FC_VM_DIR=filmcraft-wip",
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-run.sh",
+      "sh",
+      "-c",
+      "cargo fmt --check && cargo clippy -p filmcraft-scenerender --all-targets -- -D warnings && cargo test -p filmcraft-scenerender && cargo xtask layers && cargo xtask wasm && git diff --stat -- Cargo.lock"
+    ],
+    "codex-proto": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/codex-agent.sh",
+      "proto"
+    ],
+    "codex-runner": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/codex-agent.sh",
+      "runner"
+    ],
+    "codex-store": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/codex-agent.sh",
+      "store"
+    ],
+    "codex-source": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/agents/../codex-agent.sh",
+      "source"
+    ],
+    "codex-engine": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/codex-agent.sh",
+      "engine"
+    ],
+    "agent": [
+      "bash",
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/codex-agent.sh"
+    ],
+    "ci-ref": [
+      "sh",
+      "-c",
+      "FC_SYNC_REF=\"$0\" FC_SYNC_HEAD_ONLY=1 exec /home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-run.sh cargo xtask ci"
+    ],
+    "vm-free": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-free.sh"
+    ],
+    "vm-agent": [
+      "/home/admin/src/render-frontend-js/PALS-Notes/projects/ops/filmcraft-scene/vm-agent.sh"
+    ]
+  },
+  "files": {},
+  "approvals": {},
+  "notes": [
+    {
+      "at": "2026-10-13T13:34:25.178Z",
+      "stage": "plan",
+      "text": "Lane exit conditions (ops, not the video ones the brief prints): plan = PLAN.md tasks S1..Sn agreed + codex plan review answered; doing = each task one commit on branch scene-interchange, cargo xtask ci green; review = codex review of the branch diff answered, findings fixed; done = PR opened (owner decides merge)."
+    },
+    {
+      "at": "2026-10-13T13:34:25.347Z",
+      "stage": "plan",
+      "text": "Scope = option A agreed with owner 2026-10-13: filmcraft-scene L2 crate, vendored sr-core schema 1.7.0, scene XML import -> sequence with report, export sequence -> scene XML, vpkg 1.1 read/verify/write. NOT B (external scene-render runtime) nor C (native engine). Licence: no scene-render (PolyForm NC) code; sr-core is MIT, vendor with attribution."
+    },
+    {
+      "at": "2026-10-13T13:43:57.685Z",
+      "stage": "plan",
+      "text": "Licence update 2026-10-13: owner authored both sr-core and scene-render and granted permission to borrow scene-render code into FilmCraft. Borrowed code records provenance in ATTRIBUTION.md and is adapted to never-crash/layering/Tick rules. sr-core Python SDK (sr-scene check --schema, scenerender-vpkg) is an opt-in external test oracle (SR_CORE_DIR)."
+    },
+    {
+      "at": "2026-10-13T13:56:17.659Z",
+      "stage": "plan",
+      "text": "Plan rev 2 (2026-10-13): Codex review 20261013T134759Z-filmcraft-4f-5clf folded into PLAN.md (paint-order stacking fix, semantic resolve pass, validate-before-import, Error::Invalid diagnostics, flate extraction to bitstream, SREP 1/6 scope); tasks renumbered S1..S12. Owner fork: github.com/pedroanisio/filmcraft (remote 'fork'); push/PR still needs owner approval."
+    },
+    {
+      "at": "2026-10-13T14:01:40.887Z",
+      "stage": "doing",
+      "text": "Env limit 2026-10-13: this WSL box lacks libasound2-dev/libgtk-3-dev/X11/wayland dev packages (no sudo), so the 'filmcraft' app crate (cpal/alsa-sys, rfd) cannot build here. Gates run as ci-headless = full xtask ci minus --exclude filmcraft. Owner/CI must run full cargo xtask ci before merge."
+    },
+    {
+      "at": "2026-10-13T14:08:36.858Z",
+      "stage": "doing",
+      "text": "Env fixed 2026-10-13: owner installed ALSA/GTK/X11/wayland/dbus dev packages; full 'ci' (cargo xtask ci) is the gate again, ci-headless kept only as a fallback."
+    },
+    {
+      "at": "2026-10-13T14:43:58.823Z",
+      "stage": "doing",
+      "text": "Builds/tests must NOT run on the workstation (owner, 2026-10-13): gates run on a lab VM via pve-ctl (dev@192.168.199.49, ~/pve-lab/lab.sh). Existing dev-02 (1G free disk) and dev-03 (9G free, specforge) are too small. Proposed: clone 119 fc-build-01 12c/16G on pve-note-1, disk 100G \u2014 awaiting owner approval (VM creation was blocked). S0 (clippy 1.96 fix) + S1 still uncommitted pending a green ci on the VM."
+    },
+    {
+      "at": "2026-10-13T16:22:19.450Z",
+      "stage": "doing",
+      "text": "Build VM: fc-build-01 (VMID 119, pve-note-1, 12c/16G/100G, 192.168.199.101, tags debian;dev;filmcraft), reached only via pve-ctl lab.sh. Lane commands ci/ci-headless/test/clippy/corpus now run vm-run.sh = vm-sync.sh (public base cee1feb1 cloned from storytold/filmcraft + git bundle of local commits + uncommitted patch + untracked tar, nothing pushed) then the command in ~/filmcraft. ~/filmcraft marked derived: the workstation is the source of truth. corpus needs sr-core shipped to ~/sr-core on the VM (S11). Destroy the VM via lab.sh audit/destroy when the lane is done."
+    },
+    {
+      "at": "2026-10-13T17:34:40.477Z",
+      "stage": "doing",
+      "text": "S3 split 2026-10-13: S3a = diag Collector, own linear-time XSD regex (no new dep; patterns run on it instead of 14 hand-coded parsers, values.rs parsers get equivalence tests vs the schema patterns), tables.rs generated from the vendored XSD by the tables_match_schema test (FILMCRAFT_BLESS=1 rewrites; staleness fails the test) instead of a build.rs, simple + structure checkers from sr-model xsd/. S3b = rules.rs from sr-model c0c668b8 (with foam.rs and assets::sequence_frame), wired after structure as upstream document.rs does; inert.rs/assets verify/program expansion not ported (render or I/O stages). Conformance parity test opt-in via SR_CORE_DIR (kit shipped to VM ~/sr-core at babeccf0)."
+    },
+    {
+      "at": "2026-10-14T02:16:31.987Z",
+      "stage": "doing",
+      "text": "2026-10-14 02:16Z: back on govern (559a41a) for agent/review jobs via new lane cmd 'agent' (codex-agent.sh <name>); jobs 2026-10-13 23:47Z-00:03Z ran as hand-rolled bash in govern/jobs. S7b committed 8084adab (ff onto scene-interchange). engine2 fix round 2 dispatched (scope approved: control.rs + media_pool.rs, pending-scope.patch only). S7c (two round-trip regressions) dispatched to roundtrip. Open blocker: fc-build-01 disk 100G too small for full release CI; resize to 200G awaiting owner approval."
+    },
+    {
+      "at": "2026-10-14T02:18:53.361Z",
+      "stage": "doing",
+      "text": "2026-10-14: owner allowed freeing VM resources via govern. Added lane cmds vm-free (vm-free.sh <agent>..., rm ~/filmcraft-<agent>/target, refuses running agents) and ci-ref (FC_SYNC_REF=<sha> gates an ancestor of HEAD; vm-sync/vm-apply support it). ci-head 20261013T213803Z had actually gated f3d5a624 (S0): fmt+clippy green, test step ENOSPC. CI on 2a973f62 queued after agents finish. vm-free run blocked by Claude Code rm safety check: owner to run 'govern run ops/filmcraft-scene vm-free -- import import2'."
+    },
+    {
+      "at": "2026-10-14T02:32:36.674Z",
+      "stage": "doing",
+      "text": "vm-run.sh: agent checkouts (FC_VM_DIR != filmcraft) now build with CARGO_INCREMENTAL=0 and drop target/debug/incremental when no cargo runs in that checkout (engine2 incremental reached 31G, VM at 8.4G free). Added lane cmd vm-agent. S8 26d6ca4b fast-forwarded onto scene-interchange after a green rebased gate."
+    },
+    {
+      "at": "2026-10-14T03:29:13.183Z",
+      "stage": "doing",
+      "text": "2026-10-14 03:29 dispatched S10 vpkg (20261014T032908Z-agent) and S11 corpus (\u2026agent.002) from 8e4a2978; ~/sr-core @babeccf + python3-lxml on fc-build-01; ci-ref 2a973f62 running"
+    },
+    {
+      "at": "2026-10-14T08:08:12.289Z",
+      "stage": "doing",
+      "text": "fc-build-01 disk grown 100G->250G online (growpart+resize2fs, 213G free), tag keep added. PENDING after ci-head + vpkg + corpus jobs finish: memory 16->24 GiB on VMID 119 (reboot) and sr-style-03 (118, note-1) 10->6 GiB (reboot), user-approved. Then update wiki Proxmox page with FilmCraft VM."
+    }
+  ]
+}

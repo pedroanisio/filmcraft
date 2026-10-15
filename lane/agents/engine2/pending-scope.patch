@@ -1,0 +1,84 @@
+--- a/crates/engine/src/media_pool.rs
++++ b/crates/engine/src/media_pool.rs
+@@ -300,7 +300,13 @@
+     /// has one: containers then read only their index now and samples on demand).
+     pub fn open_file(&self, path: &str, services: &dyn Services) -> Result<SharedSource, MediaError> {
+         if crate::scene_render::is_scene(path) {
+-            return self.open_scene_bytes(path, &crate::scene_render::read(path, services)?).map(|opened| opened.source);
++            let bytes = crate::scene_render::read(path, services)?;
++            let opened = if services.export_in_memory() {
++                crate::scene_render::virtual_placeholder(path, &bytes)
++            } else {
++                self.open_scene_bytes(path, &bytes)
++            };
++            return opened.map(|opened| opened.source);
+         }
+         let io = |e: std::io::Error| if e.kind() == std::io::ErrorKind::NotFound { MediaError::Offline(e.to_string()) } else { MediaError::Io(e.to_string()) };
+         if let Some(r) = services.reader(path) {
+@@ -371,7 +377,13 @@
+                     env.quality = filmcraft_scenerender::Quality::Final;
+                 }
+                 crate::scene_render::read(path, services)
+-                    .and_then(|bytes| crate::scene_render::open(path, &bytes, &env))
++                    .and_then(|bytes| {
++                        if services.export_in_memory() {
++                            crate::scene_render::virtual_placeholder(path, &bytes)
++                        } else {
++                            crate::scene_render::open(path, &bytes, &env)
++                        }
++                    })
+                     .map(|opened| (opened.source, opened.warning))
+             } else if m.info.kind == filmcraft_media::MediaKind::ImageSequence {
+                 open_image_sequence(path, services, m.info.frame_rate(), &it.name).map(|source| (source, None))
+--- a/crates/ui-egui/src/menus.rs
++++ b/crates/ui-egui/src/menus.rs
+@@ -177,7 +177,17 @@
+ }
+ 
+ /// Execute a UI or engine command by id.
+-pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params: Value) -> Result<Value, String> {
++pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
++    invoke_inner(app, ctx, id, params, &mut None)
++}
++
++/// Control-channel dispatch with structured engine errors retained.
++pub(crate) fn invoke_json(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, Value> {
++    let mut error = None;
++    invoke_inner(app, ctx, id, params, &mut error).map_err(|message| error.unwrap_or_else(|| json!({"error": message})))
++}
++
++fn invoke_inner(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params: Value, error: &mut Option<Value>) -> Result<Value, String> {
+     if id == "edit.selectAll" && (crate::panels::graphics::select_all_edited_text(app) || crate::panels::effect_controls::select_all_keyframes(app)) {
+         return Ok(Value::Null);
+     }
+@@ -584,7 +594,10 @@
+     {
+         return app.file_dialog(id, &params);
+     }
+-    let r = app.session.execute(id, params).map_err(|e| e.to_string());
++    let r = app.session.execute(id, params).map_err(|e| {
++        *error = Some(e.to_json());
++        e.to_string()
++    });
+     if let Err(e) = &r {
+         app.ui.status = e.clone();
+     }
+--- a/crates/ui-egui/src/control.rs
++++ b/crates/ui-egui/src/control.rs
+@@ -103,9 +103,14 @@
+         "engine.execute" | "ui.menu.invoke" => {
+             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
+             let params = p.get("params").cloned().unwrap_or(json!({}));
+-            match crate::menus::invoke(app, ctx, id, params) {
++            match crate::menus::invoke_json(app, ctx, id, params) {
+                 Ok(v) => ok(v),
+-                Err(e) => err(e),
++                Err(mut error) => {
++                    if let Some(object) = error.as_object_mut() {
++                        object.insert("ok".into(), json!(false));
++                    }
++                    Outcome::Done(error)
++                }
+             }
+         }
+         "engine.commands" => match app.session.execute("command.list", json!({})) {

@@ -1,0 +1,18 @@
+{
+  "task_id": "fixexport-review-1",
+  "agent_id": "fixexport",
+  "objective": "Address three export review findings red-first on VM",
+  "declared_files": [
+    "crates/interchange/src/scene/export.rs",
+    "crates/interchange/src/scene/export/tests.rs"
+  ],
+  "status": "completed",
+  "opened_at": "2026-10-14T10:14:48.633230+00:00",
+  "updated_at": "2026-10-14T10:33:36.657076+00:00",
+  "closed_at": "2026-10-14T10:33:36.657076+00:00",
+  "result_summary": "All review findings addressed; full VM gate green; corpus failure identities unchanged.",
+  "actual_files": [
+    "crates/interchange/src/scene/export.rs",
+    "crates/interchange/src/scene/export/tests.rs"
+  ]
+}

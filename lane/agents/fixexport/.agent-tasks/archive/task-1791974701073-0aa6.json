@@ -1,0 +1,18 @@
+{
+  "task_id": "task-1791974701073-0aa6",
+  "agent_id": "fixexport",
+  "objective": "Review round 2: preserve subframe and retimed linked audio",
+  "declared_files": [
+    "crates/interchange/src/scene/export.rs",
+    "crates/interchange/src/scene/export/tests.rs"
+  ],
+  "status": "completed",
+  "opened_at": "2026-10-14T10:45:01.073961+00:00",
+  "updated_at": "2026-10-14T11:01:19.924563+00:00",
+  "closed_at": "2026-10-14T11:01:19.924563+00:00",
+  "actual_files": [
+    "crates/interchange/src/scene/export.rs",
+    "crates/interchange/src/scene/export/tests.rs"
+  ],
+  "result_summary": "Both round 2 findings fixed red-first; gate green, corpus failures unchanged."
+}

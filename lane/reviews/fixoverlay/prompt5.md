@@ -1,0 +1,23 @@
+You are reviewing uncommitted work in this git worktree (see `git diff`): crates/interchange/src/scene/import.rs, scene/import/overlay.rs, scene/import/tests.rs, tests/sr_core_corpus.rs. Read-only: do not modify files, do not run cargo.
+
+Intent: sr-core scene import promotes nodes FilmCraft can't represent natively into "overlay" clips (a self-contained sub-document rendered by scene-render). The overlay's dependency closure used to refuse sibling dependencies and missed several reference kinds. Now: the closure keeps enclosing containers and their clocks, retains all build-program emitters for generated ids (deferred refs), follows materialOverride (name:id pairs) and voxel palette material ids transitively, keeps black-hole/disk context for geodesic cameras. The importer coalesces overlays (later promotions subsume earlier), gives each retained carrier its enclosing container's interval/visibility, and suppresses native or separate overlay clips already covered, so nothing renders twice. Bounds: 100,000 selected nodes, depth 256, 2,000,000 work units, plus existing 64 MiB output limits.
+
+Ground truth: crates/interchange/schema/sr-core/scene-render.xsd; /home/admin/src/scene-render/crates/sr-model/src/{program_ids.rs,rules.rs}, sr-eval/src/program.rs (Clock::Affine). Repo rules: AGENTS.md §0 never-crash (no unwrap/expect/panic/[i] on hostile data, checked math, bounded allocation/recursion).
+
+Find real defects only, ranked: P1 = content rendered twice or lost (a covered clip not suppressed, a suppressed clip not actually inside any overlay, wrong interval/timing/clock mapping, visibility or opacity of enclosing containers lost, z/paint order between overlay and remaining native clips wrong), dependency kinds still missed (other id-referencing attributes in the XSD: masks, mattes, textures, fonts, paths, uses/clones, expressions referencing ids), a budget bypass (e.g. coalescing that is quadratic or unbounded, work not charged), or a panic path; P2 = missing test coverage for stated behavior, reports that misstate loss; P3 = clarity. For each: file:line, concrete scenario, minimal fix. End with a verdict line: SHIP, SHIP-WITH-FIXES, or BLOCK.
+
+FOLLOW-UP PASS. Your previous review (below) went to the author, who reports fixing both items. Ordinary cameras now retain the whole enclosing composition as one overlay; viewport cameras keep their viewport scope. Verify that each fix is correct and complete, and look for regressions the fixes introduced. Report only remaining or new defects. Don't re-report fixed issues, or limitations the code already reports to the user (for example repeat-template audio, which is reported as unsupported). Be calibrated: P1 only for concrete wrong output that is not reported, a panic, or unbounded work. End with SHIP or BLOCK.
+
+Two remaining P1 defects:
+
+1. **P1 — Ordinary audio after a 3D sequence child uses stale timing.** [import.rs:251](/home/admin/src/filmcraft-wt/fixoverlay/crates/interchange/src/scene/import.rs:251)  
+   In a 12-second project, use `<sequence><layer id="a" asset="v" threeD="true" clipOut="2"/><layer id="b" asset="v" clipOut="2"/></sequence>`, with audio-bearing video `v`. The original resolver gives `a` the inherited 12-second duration, placing `b` at 12 seconds. The audio re-resolution correctly places them at `[0,2)` and `[2,4)`, but this branch uses that result only for `a`: `b` already has a source map, so its soundtrack is silently omitted. The overlay renders both layers correctly.  
+   **Minimal fix:** use the audio-resolved timeline consistently for audio-bearing layers, including their occupancy and animation timing. Add this sequence regression.
+
+2. **P1 — Ordinary cameras remain disconnected from their rendered objects.** [overlay.rs:285](/home/admin/src/filmcraft-wt/fixoverlay/crates/interchange/src/scene/import/overlay.rs:285)  
+   With sibling `<camera id="view" z="-1000" fov="20"/>` and `<object3D id="box" primitive="box"/>`, neither references the other explicitly. Context promotion applies only to geodesic cameras, so preparation produces separate camera-only and object-only overlays. The object renders with the implicit camera, losing the specified projection; the camera-only overlay cannot restore it. The report claims preservation without reporting this loss. The XSD’s camera selection applies implicitly across the scene.  
+   **Minimal fix:** promote ordinary cameras and their affected 3D content into a shared scene scope, preserving camera switching and coalescing covered clips. Add a camera-without-target regression.
+
+The other reported fixes address their stated cases. Review was read-only; no cargo commands were run.
+
+BLOCK
